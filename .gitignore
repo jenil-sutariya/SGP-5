@@ -1,0 +1,8 @@
+node_modules/
+.cursor/
+.gemini/
+.env
+.env.*
+dist/
+build/
+*.log

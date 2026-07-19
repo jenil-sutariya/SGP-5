@@ -1,0 +1,6 @@
+{
+  "lint-staged": {
+    "backend/src/**/*.{ts,js}": ["eslint --fix", "prettier --write"],
+    "frontend/src/**/*.{ts,tsx,css}": ["prettier --write"]
+  }
+}

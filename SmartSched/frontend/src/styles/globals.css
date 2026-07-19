@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* CHARUSAT-inspired navy + gold accent */
+  --color-primary: #0b3d91;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #c45c26;
+  --color-success: #22c55e;
+  --color-danger: #ef4444;
+  --color-warning: #f59e0b;
+  --color-background: #f3f6fb;
+  --color-foreground: #0f172a;
+  --color-card: rgba(255, 255, 255, 0.78);
+  --color-muted: #64748b;
+  --color-border: rgba(148, 163, 184, 0.35);
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Instrument Sans", "DM Sans", sans-serif;
+}
+
+.dark {
+  --color-background: #0b1220;
+  --color-foreground: #e2e8f0;
+  --color-card: rgba(15, 23, 42, 0.72);
+  --color-muted: #94a3b8;
+  --color-border: rgba(148, 163, 184, 0.2);
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--color-foreground);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(11, 61, 145, 0.16), transparent 55%),
+    radial-gradient(900px 500px at 90% 0%, rgba(196, 92, 38, 0.1), transparent 50%),
+    var(--color-background);
+  background-attachment: fixed;
+}
+
+.glass {
+  background: var(--color-card);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.06);
+}
+
+.dark .glass {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+}
+
+.print-friendly {
+  background: white !important;
+  color: black !important;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .print-area {
+    box-shadow: none !important;
+    background: white !important;
+  }
+}

@@ -1,0 +1,946 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum RoleName {
+  ADMIN
+  INSTITUTE_ADMIN
+  DEPARTMENT_HEAD
+  FACULTY
+  STUDENT
+  SCHEDULER
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum RoomTypeName {
+  CLASSROOM
+  LABORATORY
+  LECTURE_HALL
+  SEMINAR
+  AUDITORIUM
+  COMPUTER_LAB
+}
+
+enum DifficultyLevel {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum SubjectType {
+  THEORY
+  LAB
+  PRACTICAL
+  TUTORIAL
+  PROJECT
+}
+
+enum TimetableStatus {
+  DRAFT
+  GENERATING
+  GENERATED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ConflictSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum NotificationType {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+  TIMETABLE
+  LEAVE
+  SYSTEM
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ConstraintType {
+  HARD
+  SOFT
+}
+
+enum PreferenceType {
+  PREFERRED
+  AVOID
+  UNAVAILABLE
+}
+
+// ─── Auth & Users ─────────────────────────────────────────────────────────────
+
+model Role {
+  id          String   @id @default(cuid())
+  name        RoleName @unique
+  description String?
+  permissions Json     @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]
+
+  @@map("roles")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  phone         String?
+  avatarUrl     String?
+  isActive      Boolean   @default(true)
+  emailVerified Boolean   @default(false)
+  roleId        String
+  departmentId  String?
+  instituteId   String?
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  role             Role               @relation(fields: [roleId], references: [id])
+  department       Department?        @relation(fields: [departmentId], references: [id])
+  institute        Institute?         @relation(fields: [instituteId], references: [id])
+  faculty          Faculty?
+  student          Student?
+  refreshTokens    RefreshToken[]
+  passwordResets   PasswordReset[]
+  notifications    Notification[]
+  auditLogs        AuditLog[]
+  settings         UserSetting?
+  managedInstitute Institute?         @relation("InstituteAdmin")
+
+  @@index([email])
+  @@index([roleId])
+  @@index([departmentId])
+  @@index([instituteId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  ipAddress String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("password_resets")
+}
+
+// ─── Institute & Organisation ─────────────────────────────────────────────────
+
+model Institute {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  fullName    String?
+  description String?
+  adminUserId String?  @unique
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  adminUser   User?        @relation("InstituteAdmin", fields: [adminUserId], references: [id], onDelete: SetNull)
+  users       User[]
+  departments Department[]
+  buildings   Building[]
+  batches     StudentBatch[]
+  days        Day[]
+  timeSlots   TimeSlot[]
+  holidays    Holiday[]
+
+  @@map("institutes")
+}
+
+model Department {
+  id          String   @id @default(cuid())
+  code        String
+  name        String
+  description String?
+  instituteId String
+  buildingId  String?
+  headId      String?  @unique
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  institute    Institute      @relation(fields: [instituteId], references: [id], onDelete: Cascade)
+  building     Building?      @relation(fields: [buildingId], references: [id])
+  users        User[]
+  programs     Program[]
+  faculty      Faculty[]
+  students     Student[]
+  subjects     Subject[]
+  courses      Course[]
+  rooms        Room[]
+  laboratories Laboratory[]
+  sections     Section[]
+  timetables   Timetable[]
+  batches      StudentBatch[]
+
+  @@unique([instituteId, code])
+  @@index([code])
+  @@index([instituteId])
+  @@map("departments")
+}
+
+model Building {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  address     String?
+  floors      Int      @default(1)
+  description String?
+  instituteId String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  institute    Institute?    @relation(fields: [instituteId], references: [id])
+  departments  Department[]
+  rooms        Room[]
+  laboratories Laboratory[]
+
+  @@index([instituteId])
+  @@map("buildings")
+}
+
+// ─── Academic Structure ───────────────────────────────────────────────────────
+
+model Program {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String
+  degree        String
+  durationYears Int      @default(4)
+  departmentId  String
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  department Department    @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  sections   Section[]
+  courses    Course[]
+  batches    StudentBatch[]
+  students   Student[]
+
+  @@index([departmentId])
+  @@map("programs")
+}
+
+model StudentBatch {
+  id           String   @id @default(cuid())
+  name         String
+  code         String
+  instituteId  String
+  departmentId String
+  programId    String?
+  batchYear    Int
+  semesterNo   Int      @default(1)
+  capacity     Int      @default(60)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  institute  Institute  @relation(fields: [instituteId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  program    Program?   @relation(fields: [programId], references: [id])
+  sections   Section[]
+  students   Student[]
+
+  @@unique([instituteId, code])
+  @@index([departmentId])
+  @@index([batchYear])
+  @@map("student_batches")
+}
+
+model AcademicYear {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  startDate DateTime
+  endDate   DateTime
+  isCurrent Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  semesters  Semester[]
+  timetables Timetable[]
+  holidays   Holiday[]
+
+  @@map("academic_years")
+}
+
+model Semester {
+  id             String   @id @default(cuid())
+  name           String
+  number         Int
+  academicYearId String
+  startDate      DateTime
+  endDate        DateTime
+  isCurrent      Boolean  @default(false)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  academicYear    AcademicYear     @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  courseOfferings CourseOffering[]
+  sections        Section[]
+  timetables      Timetable[]
+
+  @@unique([academicYearId, number])
+  @@index([academicYearId])
+  @@map("semesters")
+}
+
+// ─── People ───────────────────────────────────────────────────────────────────
+
+model Faculty {
+  id              String    @id @default(cuid())
+  employeeId      String    @unique
+  userId          String    @unique
+  departmentId    String
+  designation     String
+  specialization  String?
+  maxHoursPerWeek Int       @default(16)
+  maxHoursPerDay  Int       @default(4)
+  joiningDate     DateTime?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user              User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department        Department            @relation(fields: [departmentId], references: [id])
+  availability      FacultyAvailability[]
+  preferences       FacultyPreference[]
+  leaves            FacultyLeave[]
+  courseAssignments CourseAssignment[]
+  timetableEntries  TimetableEntry[]
+
+  @@index([departmentId])
+  @@index([employeeId])
+  @@map("faculty")
+}
+
+model Student {
+  id              String   @id @default(cuid())
+  enrollmentNo    String   @unique
+  userId          String   @unique
+  departmentId    String
+  programId       String?
+  sectionId       String?
+  batchId         String?
+  batchYear       Int
+  currentSemester Int      @default(1)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department Department    @relation(fields: [departmentId], references: [id])
+  program    Program?      @relation(fields: [programId], references: [id])
+  section    Section?      @relation(fields: [sectionId], references: [id])
+  batch      StudentBatch? @relation(fields: [batchId], references: [id])
+  practicalBatchId String?
+  practicalBatch   PracticalBatch? @relation("StudentToPracticalBatch", fields: [practicalBatchId], references: [id])
+
+  @@index([departmentId])
+  @@index([enrollmentNo])
+  @@index([sectionId])
+  @@index([batchId])
+  @@index([programId])
+  @@index([practicalBatchId])
+  @@map("students")
+}
+
+// ─── Subjects & Courses ───────────────────────────────────────────────────────
+
+model Subject {
+  id           String          @id @default(cuid())
+  code         String          @unique
+  name         String
+  description  String?
+  credits      Int             @default(3)
+  weeklyHours  Int             @default(3)
+  type         SubjectType     @default(THEORY)
+  difficulty   DifficultyLevel @default(MEDIUM)
+  departmentId String
+  requiresLab  Boolean         @default(false)
+  labHours     Int             @default(0)
+  isActive     Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  department      Department           @relation(fields: [departmentId], references: [id])
+  requirements    SubjectRequirement[]
+  courseSubjects  CourseSubject[]
+  courseOfferings CourseOffering[]
+
+  @@index([departmentId])
+  @@index([code])
+  @@map("subjects")
+}
+
+model SubjectRequirement {
+  id          String   @id @default(cuid())
+  subjectId   String
+  requirement String
+  roomTypeId  String?
+  minCapacity Int?
+  equipment   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subject  Subject   @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  roomType RoomType? @relation(fields: [roomTypeId], references: [id])
+
+  @@index([subjectId])
+  @@map("subject_requirements")
+}
+
+model Course {
+  id           String   @id @default(cuid())
+  code         String   @unique
+  name         String
+  description  String?
+  departmentId String
+  programId    String?
+  semesterNo   Int
+  totalCredits Int      @default(0)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  department      Department       @relation(fields: [departmentId], references: [id])
+  program         Program?         @relation(fields: [programId], references: [id])
+  courseSubjects  CourseSubject[]
+  courseOfferings CourseOffering[]
+
+  @@index([departmentId])
+  @@index([programId])
+  @@map("courses")
+}
+
+model CourseSubject {
+  id        String  @id @default(cuid())
+  courseId  String
+  subjectId String
+  isCore    Boolean @default(true)
+
+  course  Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, subjectId])
+  @@map("course_subjects")
+}
+
+model CourseOffering {
+  id          String   @id @default(cuid())
+  courseId    String
+  subjectId   String
+  semesterId  String
+  sectionId   String?
+  maxStudents Int      @default(60)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  course           Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  subject          Subject            @relation(fields: [subjectId], references: [id])
+  semester         Semester           @relation(fields: [semesterId], references: [id])
+  section          Section?           @relation(fields: [sectionId], references: [id])
+  assignments      CourseAssignment[]
+  timetableEntries TimetableEntry[]
+
+  @@unique([courseId, subjectId, semesterId, sectionId])
+  @@index([semesterId])
+  @@index([subjectId])
+  @@map("course_offerings")
+}
+
+model Section {
+  id           String   @id @default(cuid())
+  name         String
+  code         String
+  departmentId String
+  programId    String
+  semesterId   String
+  batchId      String?
+  capacity     Int      @default(60)
+  year         Int
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  department       Department       @relation(fields: [departmentId], references: [id])
+  program          Program          @relation(fields: [programId], references: [id])
+  semester         Semester         @relation(fields: [semesterId], references: [id])
+  batch            StudentBatch?    @relation(fields: [batchId], references: [id])
+  students         Student[]
+  courseOfferings  CourseOffering[]
+  practicalBatches PracticalBatch[]
+  timetableEntries TimetableEntry[]
+
+  @@unique([code, semesterId])
+  @@index([departmentId])
+  @@index([batchId])
+  @@map("sections")
+}
+
+// ─── Rooms & Labs ─────────────────────────────────────────────────────────────
+
+model RoomType {
+  id          String       @id @default(cuid())
+  name        RoomTypeName @unique
+  description String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  rooms               Room[]
+  subjectRequirements SubjectRequirement[]
+
+  @@map("room_types")
+}
+
+model Room {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String
+  buildingId    String
+  departmentId  String?
+  roomTypeId    String
+  floor         Int      @default(1)
+  capacity      Int
+  hasProjector  Boolean  @default(false)
+  hasAC         Boolean  @default(false)
+  hasWhiteboard Boolean  @default(true)
+  equipment     String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  building         Building        @relation(fields: [buildingId], references: [id])
+  department       Department?     @relation(fields: [departmentId], references: [id])
+  roomType         RoomType        @relation(fields: [roomTypeId], references: [id])
+  timetableEntries TimetableEntry[]
+
+  @@index([buildingId])
+  @@index([departmentId])
+  @@index([roomTypeId])
+  @@map("rooms")
+}
+
+model Laboratory {
+  id           String   @id @default(cuid())
+  code         String   @unique
+  name         String
+  buildingId   String
+  departmentId String
+  floor        Int      @default(1)
+  capacity     Int
+  equipment    String?
+  labType      String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  building         Building        @relation(fields: [buildingId], references: [id])
+  department       Department      @relation(fields: [departmentId], references: [id])
+  timetableEntries TimetableEntry[]
+
+  @@index([departmentId])
+  @@index([buildingId])
+  @@map("laboratories")
+}
+
+// ─── Scheduling Primitives ────────────────────────────────────────────────────
+
+model Day {
+  id        String    @id @default(cuid())
+  name      DayOfWeek @unique
+  shortName String
+  order     Int       @unique
+  isWorking Boolean   @default(true)
+  instituteId String?
+  institute   Institute? @relation(fields: [instituteId], references: [id])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  availability     FacultyAvailability[]
+  preferences      FacultyPreference[]
+  timetableEntries TimetableEntry[]
+
+  @@index([instituteId])
+  @@map("days")
+}
+
+// TimeSlots are global periods (e.g. "Period 1 09:10-10:10").
+// dayId is kept optional for backward compatibility with the generated client.
+model TimeSlot {
+  id           String   @id @default(cuid())
+  name         String
+  startTime    String
+  endTime      String
+  order        Int      @unique
+  dayId        String?  // deprecated — kept for Prisma client compatibility
+  isLunchBreak Boolean  @default(false)
+  durationMins Int      @default(60)
+  isActive     Boolean  @default(true)
+  instituteId  String?
+  institute    Institute? @relation(fields: [instituteId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  availability     FacultyAvailability[]
+  preferences      FacultyPreference[]
+  timetableEntries TimetableEntry[]
+
+  @@index([instituteId])
+  @@map("time_slots")
+}
+
+model FacultyAvailability {
+  id          String  @id @default(cuid())
+  facultyId   String
+  dayId       String
+  timeSlotId  String
+  isAvailable Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  faculty  Faculty  @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+  day      Day      @relation(fields: [dayId], references: [id])
+  timeSlot TimeSlot @relation(fields: [timeSlotId], references: [id])
+
+  @@unique([facultyId, dayId, timeSlotId])
+  @@index([facultyId])
+  @@map("faculty_availability")
+}
+
+model FacultyPreference {
+  id             String         @id @default(cuid())
+  facultyId      String
+  dayId          String?
+  timeSlotId     String?
+  preferenceType PreferenceType
+  weight         Int            @default(5)
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  faculty  Faculty   @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+  day      Day?      @relation(fields: [dayId], references: [id])
+  timeSlot TimeSlot? @relation(fields: [timeSlotId], references: [id])
+
+  @@index([facultyId])
+  @@map("faculty_preferences")
+}
+
+model FacultyLeave {
+  id        String      @id @default(cuid())
+  facultyId String
+  startDate DateTime
+  endDate   DateTime
+  reason    String?
+  status    LeaveStatus @default(PENDING)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  faculty Faculty @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+
+  @@index([facultyId])
+  @@index([status])
+  @@map("faculty_leaves")
+}
+
+// ─── Assignments ──────────────────────────────────────────────────────────────
+
+model CourseAssignment {
+  id               String   @id @default(cuid())
+  courseOfferingId String
+  facultyId        String
+  isPrimary        Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  courseOffering CourseOffering @relation(fields: [courseOfferingId], references: [id], onDelete: Cascade)
+  faculty        Faculty        @relation(fields: [facultyId], references: [id])
+
+  @@unique([courseOfferingId, facultyId])
+  @@index([facultyId])
+  @@map("course_assignments")
+}
+
+
+model PracticalBatch {
+  id        String   @id @default(cuid())
+  name      String
+  code      String
+  sectionId String
+  capacity  Int      @default(20)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  section          Section          @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  students         Student[]        @relation("StudentToPracticalBatch")
+  timetableEntries TimetableEntry[]
+
+  @@unique([sectionId, code])
+  @@map("practical_batches")
+}
+
+
+// ─── Timetable ────────────────────────────────────────────────────────────────
+
+model Timetable {
+  id             String          @id @default(cuid())
+  name           String
+  academicYearId String
+  semesterId     String
+  departmentId   String?
+  status         TimetableStatus @default(DRAFT)
+  version        Int             @default(1)
+  score          Float?
+  generatedAt    DateTime?
+  publishedAt    DateTime?
+  createdById    String?
+  metadata       Json?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  academicYear AcademicYear        @relation(fields: [academicYearId], references: [id])
+  semester     Semester            @relation(fields: [semesterId], references: [id])
+  department   Department?         @relation(fields: [departmentId], references: [id])
+  entries      TimetableEntry[]
+  conflicts    TimetableConflict[]
+
+  @@index([semesterId])
+  @@index([departmentId])
+  @@index([status])
+  @@map("timetables")
+}
+
+model TimetableEntry {
+  id               String   @id @default(cuid())
+  timetableId      String
+  courseOfferingId String
+  facultyId        String
+  roomId           String?
+  laboratoryId     String?
+  sectionId        String?
+  practicalBatchId String?
+  dayId            String
+  timeSlotId       String
+  isLab            Boolean  @default(false)
+  isLocked         Boolean  @default(false)
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  timetable      Timetable      @relation(fields: [timetableId], references: [id], onDelete: Cascade)
+  courseOffering CourseOffering @relation(fields: [courseOfferingId], references: [id])
+  faculty        Faculty        @relation(fields: [facultyId], references: [id])
+  room           Room?          @relation(fields: [roomId], references: [id])
+  laboratory     Laboratory?    @relation(fields: [laboratoryId], references: [id])
+  section        Section?       @relation(fields: [sectionId], references: [id])
+  practicalBatch PracticalBatch? @relation(fields: [practicalBatchId], references: [id])
+  day            Day            @relation(fields: [dayId], references: [id])
+  timeSlot       TimeSlot       @relation(fields: [timeSlotId], references: [id])
+
+  @@unique([timetableId, dayId, timeSlotId, roomId])
+  @@unique([timetableId, dayId, timeSlotId, facultyId])
+  @@unique([timetableId, dayId, timeSlotId, practicalBatchId])
+  @@index([timetableId])
+  @@index([facultyId])
+  @@index([roomId])
+  @@index([dayId, timeSlotId])
+  @@index([practicalBatchId])
+  @@map("timetable_entries")
+}
+
+model TimetableConflict {
+  id          String           @id @default(cuid())
+  timetableId String
+  type        String
+  severity    ConflictSeverity @default(MEDIUM)
+  description String
+  entryIds    String[]
+  resolved    Boolean          @default(false)
+  resolvedAt  DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  timetable Timetable @relation(fields: [timetableId], references: [id], onDelete: Cascade)
+
+  @@index([timetableId])
+  @@index([resolved])
+  @@map("timetable_conflicts")
+}
+
+// ─── System ───────────────────────────────────────────────────────────────────
+
+model Constraint {
+  id          String         @id @default(cuid())
+  name        String         @unique
+  type        ConstraintType
+  category    String
+  description String?
+  weight      Int            @default(10)
+  config      Json           @default("{}")
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@map("constraints")
+}
+
+model Holiday {
+  id             String   @id @default(cuid())
+  name           String
+  date           DateTime
+  academicYearId String
+  isRecurring    Boolean  @default(false)
+  instituteId    String?
+  institute      Institute? @relation(fields: [instituteId], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+
+  @@index([academicYearId])
+  @@index([date])
+  @@index([instituteId])
+  @@map("holidays")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      NotificationType @default(INFO)
+  isRead    Boolean          @default(false)
+  link      String?
+  metadata  Json?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  oldValues Json?
+  newValues Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  category  String   @default("general")
+  label     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+model UserSetting {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  theme       String   @default("system")
+  language    String   @default("en")
+  timezone    String   @default("Asia/Kolkata")
+  preferences Json     @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model SpecialEvent {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  startDate   DateTime
+  endDate     DateTime
+  dayId       String?
+  timeSlotId  String?
+  roomId      String?
+  isBlocking  Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([startDate, endDate])
+  @@map("special_events")
+}
