@@ -189,9 +189,15 @@ export class SchedulingEngine {
           const current = this.labOccupancyMap.get(key) ?? 0;
           this.labOccupancyMap.set(key, current + req.requiredCapacity);
         }
+        if (a.roomId) {
+          this.roomOcc.add(occKey(best.dayId, slotId, a.roomId));
+        }
         this.facultyOcc.add(occKey(best.dayId, slotId, a.facultyId));
         if (a.practicalBatchId) {
           this.batchOcc.add(occKey(best.dayId, slotId, a.practicalBatchId));
+        }
+        if (a.sectionId) {
+          this.sectionTheoryOcc.add(occKey(best.dayId, slotId, a.sectionId));
         }
       }
       
@@ -259,21 +265,27 @@ export class SchedulingEngine {
         if (this.facultyOcc.has(occKey(dayId, slotId, req.facultyId))) return false;
       }
 
-      // Find a laboratory for this request
-      for (const lab of sortedLabs) {
-        if (lab.capacity < req.requiredCapacity) continue;
-        if (req.departmentId && !this.canShareResources(req.departmentId, lab.departmentId, ctx.departmentCodes, ctx.departmentInstitutes)) continue;
+      // Find a laboratory or classroom for this request strictly by subjectType
+      const targetLabs = sortedLabs.map((l) => ({ id: l.id, capacity: l.capacity, departmentId: l.departmentId, isRoom: false }));
+      const targetRooms = ctx.rooms.map((r) => ({ id: r.id, capacity: r.capacity, departmentId: r.departmentId, isRoom: true }));
+      const venues = req.subjectType === 'LAB' ? targetLabs : targetRooms;
 
-        let labFree = true;
+      for (const venue of venues) {
+        if (venue.capacity < req.requiredCapacity) continue;
+        if (venue.departmentId && req.departmentId && !this.canShareResources(req.departmentId, venue.departmentId, ctx.departmentCodes, ctx.departmentInstitutes)) continue;
+
+        let venueFree = true;
         for (const slotId of slotIds) {
-          const currentOccupied = this.labOccupancyMap.get(occKey(dayId, slotId, lab.id)) ?? 0;
-          const insideGroupOccupied = usedLabs.get(lab.id) ?? 0;
-          if (currentOccupied + insideGroupOccupied + req.requiredCapacity > lab.capacity) {
-            labFree = false;
+          const currentOccupied = venue.isRoom
+            ? (this.roomOcc.has(occKey(dayId, slotId, venue.id)) ? 9999 : 0)
+            : (this.labOccupancyMap.get(occKey(dayId, slotId, venue.id)) ?? 0);
+          const insideGroupOccupied = usedLabs.get(venue.id) ?? 0;
+          if (currentOccupied + insideGroupOccupied + req.requiredCapacity > venue.capacity) {
+            venueFree = false;
             break;
           }
         }
-        if (!labFree) continue;
+        if (!venueFree) continue;
 
         let batchFree = true;
         for (const slotId of slotIds) {
@@ -286,8 +298,13 @@ export class SchedulingEngine {
 
         // Allocate
         usedFaculty.add(req.facultyId);
-        const insideGroupOccupied = usedLabs.get(lab.id) ?? 0;
-        usedLabs.set(lab.id, insideGroupOccupied + req.requiredCapacity);
+        const insideGroupOccupied = usedLabs.get(venue.id) ?? 0;
+        usedLabs.set(venue.id, insideGroupOccupied + req.requiredCapacity);
+        if (venue.isRoom) {
+          for (const slotId of slotIds) {
+            this.roomOcc.add(occKey(dayId, slotId, venue.id));
+          }
+        }
         
         assignments.push({
           requestId: req.id,
@@ -297,7 +314,8 @@ export class SchedulingEngine {
           practicalBatchId: req.practicalBatchId || null,
           dayId,
           timeSlotIds: slotIds,
-          laboratoryId: lab.id,
+          laboratoryId: venue.isRoom ? undefined : venue.id,
+          roomId: venue.isRoom ? venue.id : undefined,
           isLab: true,
         });
 
@@ -305,7 +323,12 @@ export class SchedulingEngine {
 
         // Backtrack
         assignments.pop();
-        usedLabs.set(lab.id, insideGroupOccupied);
+        if (venue.isRoom) {
+          for (const slotId of slotIds) {
+            this.roomOcc.delete(occKey(dayId, slotId, venue.id));
+          }
+        }
+        usedLabs.set(venue.id, insideGroupOccupied);
         usedFaculty.delete(req.facultyId);
       }
 

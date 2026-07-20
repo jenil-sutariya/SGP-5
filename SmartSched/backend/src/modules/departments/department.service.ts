@@ -309,18 +309,32 @@ export class FacultyService {
 export class StudentService {
   async list(query: PaginationQuery & { departmentId?: string; sectionId?: string; instituteId?: string }) {
     const { page, limit, skip, sortBy, sortOrder, search } = getPagination(query);
-    const where = {
+    const where: any = {
       ...(query.departmentId ? { departmentId: query.departmentId } : {}),
       ...(query.sectionId ? { sectionId: query.sectionId } : {}),
       ...(query.instituteId ? { department: { instituteId: query.instituteId } } : {}),
-      ...buildSearchFilter(search, ['enrollmentNo']),
     };
+
+    if (search) {
+      where.OR = [
+        { enrollmentNo: { contains: search, mode: 'insensitive' } },
+        { user: { firstName: { contains: search, mode: 'insensitive' } } },
+        { user: { lastName: { contains: search, mode: 'insensitive' } } },
+        { user: { email: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    let orderBy: any = { [sortBy]: sortOrder };
+    if (sortBy === 'name') {
+      orderBy = { user: { firstName: sortOrder } };
+    }
+
     const [data, total] = await Promise.all([
       prisma.student.findMany({
         where,
         skip,
         take: limit,
-        orderBy: { [sortBy]: sortOrder },
+        orderBy,
         include: {
           user: { select: { id: true, email: true, firstName: true, lastName: true, isActive: true } },
           department: true,

@@ -2,8 +2,12 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { Cpu, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, ShieldCheck, Zap, Layers, RefreshCw } from 'lucide-react';
 import { academicApi, departmentsApi, sectionsApi, schedulerApi, timetableApi } from '@/api';
-import { Button, Card, Input, Label, Badge } from '@/components/ui';
+import { Button, Input, Label, Badge } from '@/components/ui';
+import { GlassCard } from '@/components/common/GlassCard';
+import { InstituteBadge } from '@/components/common/InstituteBadge';
 import { useAuthStore } from '@/store/authStore';
 
 type Year     = { id: string; name: string; isCurrent: boolean };
@@ -16,7 +20,6 @@ export default function SchedulerPage() {
   const user = useAuthStore((s) => s.user);
   const instituteId = user?.role?.name === 'ADMIN' ? undefined : (user?.instituteId ?? undefined);
 
-  // ── Form state ────────────────────────────────────────────────────────────
   const [name,       setName]       = useState('');
   const [yearId,     setYearId]     = useState('');
   const [semId,      setSemId]      = useState('');
@@ -26,74 +29,69 @@ export default function SchedulerPage() {
   const [resultId,   setResultId]   = useState('');
   const [submitErr,  setSubmitErr]  = useState('');
 
-  // ── Data fetching ─────────────────────────────────────────────────────────
   const { data: years } = useQuery({
     queryKey: ['years'],
     queryFn: async () => (await academicApi.years({ limit: 100 })).data.data as Year[],
     staleTime: 0,
   });
+
   const { data: semesters } = useQuery({
     queryKey: ['semesters'],
     queryFn: async () => (await academicApi.semesters({ limit: 100 })).data.data as Semester[],
     staleTime: 0,
   });
+
   const { data: departments } = useQuery({
     queryKey: ['departments', 'scoped', instituteId ?? 'all'],
     queryFn: async () =>
-      (await departmentsApi.list({ limit: 100, ...(instituteId ? { instituteId } : {}) })).data
-        .data as Dept[],
+      (await departmentsApi.list({ limit: 100, ...(instituteId ? { instituteId } : {}) })).data.data as Dept[],
     staleTime: 0,
   });
-  // Sections filtered by selected department
+
   const { data: sections } = useQuery({
-    queryKey: ['sections', deptId || 'all'],
+    queryKey: ['sections', deptId || 'all', instituteId || 'all'],
     queryFn: async () =>
       (await sectionsApi.list({
         limit: 100,
         ...(deptId ? { departmentId: deptId } : {}),
+        ...(instituteId ? { instituteId } : {}),
       })).data.data as Section[],
     staleTime: 0,
   });
 
-  // ── Auto-select current year ──────────────────────────────────────────────
   useEffect(() => {
     if (!years?.length) return;
     const cur = years.find((y) => y.isCurrent) ?? years[0];
     setYearId(cur.id);
   }, [years]);
 
-  // ── Semesters filtered to selected year ───────────────────────────────────
   const filteredSemesters = (semesters ?? []).filter(
     (s) => !yearId || s.academicYearId === yearId
   );
 
-  // ── Auto-select current semester ──────────────────────────────────────────
   useEffect(() => {
     if (!filteredSemesters.length) return;
     const cur = filteredSemesters.find((s) => s.isCurrent) ?? filteredSemesters[0];
     setSemId(cur.id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [yearId, semesters]);
 
-  // ── Reset section when department changes ──────────────────────────────────
   useEffect(() => {
     setSectionId('');
   }, [deptId]);
 
-  // ── Scheduler status ──────────────────────────────────────────────────────
   const { data: status } = useQuery({
     queryKey: ['scheduler-status', resultId],
     enabled: !!resultId,
     queryFn: async () => (await schedulerApi.status(resultId)).data.data,
     refetchInterval: (q) => (q.state.data?.status === 'GENERATING' ? 2000 : false),
   });
+
   const { data: conflicts } = useQuery({
     queryKey: ['conflicts', resultId],
     enabled: !!resultId,
     queryFn: async () => (await timetableApi.conflicts(resultId)).data.data,
   });
 
-  // ── Generate mutation ─────────────────────────────────────────────────────
   const generate = useMutation({
     mutationFn: () => {
       if (!yearId) throw new Error('Select an academic year');
@@ -112,7 +110,7 @@ export default function SchedulerPage() {
       setResultId(tt.id);
       sessionStorage.setItem('selected-timetable-id', tt.id);
       qc.invalidateQueries({ queryKey: ['timetables'] });
-      toast.success(`Generated! Score ${tt.score ?? 0} — view on Timetable page`);
+      toast.success(`Generated! Optimization Score ${tt.score ?? 0} — view on Timetable page`);
     },
     onError: (e: unknown) => {
       const msg =
@@ -132,9 +130,8 @@ export default function SchedulerPage() {
   };
 
   const selectClass =
-    'h-10 w-full rounded-xl border border-border bg-white/60 px-3 text-sm dark:bg-slate-900/50 focus:outline-none focus:ring-2 focus:ring-primary/40';
+    'h-11 w-full rounded-xl border border-border bg-white/60 px-3 text-sm font-semibold dark:bg-slate-900/60 focus:outline-none focus:ring-2 focus:ring-primary/40';
 
-  // Scope label for generate button
   const scopeLabel = sectionId
     ? `section ${(sections ?? []).find((s) => s.id === sectionId)?.name ?? ''}`
     : deptId
@@ -143,30 +140,46 @@ export default function SchedulerPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="font-display text-2xl font-bold">Scheduler Engine</h2>
-        <p className="text-sm text-muted">CSP + greedy backtracking + genetic optimization</p>
-      </div>
+      {/* Header Banner */}
+      <GlassCard className="p-6 md:p-8 bg-gradient-to-r from-primary/15 via-primary-light/10 to-amber-500/10 border-primary/20">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="space-y-2 max-w-2xl">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-primary text-white shadow-md">
+                <Cpu size={22} />
+              </div>
+              <InstituteBadge code={user?.institute?.code || 'CHARUSAT'} size="md" />
+            </div>
+            <h1 className="font-display font-extrabold text-2xl md:text-3xl text-foreground tracking-tight">
+              AI Timetable Scheduler Engine
+            </h1>
+            <p className="text-sm text-muted">
+              Constraint satisfaction algorithm with greedy backtracking and genetic polish. Synthesizes conflict-free timetables for CHARUSAT divisions.
+            </p>
+          </div>
+        </div>
+      </GlassCard>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* ── Form ─────────────────────────────────────────────────────────── */}
-        <Card>
-          <h3 className="mb-4 font-semibold">Generate Timetable</h3>
-          <form className="space-y-4" onSubmit={handleSubmit}>
-
-            <div className="space-y-2">
-              <Label htmlFor="tt-name">Name (optional)</Label>
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Form Panel */}
+        <GlassCard title="Configure Scheduler" subtitle="Set scope and parameters" headerIcon={<Zap size={18} />}>
+          <form className="space-y-4 pt-1" onSubmit={handleSubmit}>
+            <div className="space-y-1.5">
+              <Label htmlFor="tt-name" className="font-semibold text-xs text-foreground">
+                Timetable Title (optional)
+              </Label>
               <Input
                 id="tt-name"
-                placeholder="e.g. CSE Odd 2025-26"
+                placeholder="e.g. CSE Odd Semester 2025-26"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                className="rounded-xl h-11"
               />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label htmlFor="tt-year">Academic Year</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="tt-year" className="font-semibold text-xs text-foreground">Academic Year</Label>
                 <select
                   id="tt-year"
                   className={selectClass}
@@ -181,8 +194,9 @@ export default function SchedulerPage() {
                   ))}
                 </select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="tt-sem">Semester</Label>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="tt-sem" className="font-semibold text-xs text-foreground">Semester</Label>
                 <select
                   id="tt-sem"
                   className={selectClass}
@@ -199,12 +213,11 @@ export default function SchedulerPage() {
               </div>
             </div>
 
-            {/* Department + Section row */}
-            <div className="space-y-1">
-              <Label>Scope</Label>
-              <div className="rounded-xl border border-border/60 bg-slate-50/60 dark:bg-slate-800/30 p-3 space-y-3">
+            <div className="space-y-2 pt-1">
+              <Label className="font-semibold text-xs text-foreground">Scope Configuration</Label>
+              <div className="rounded-2xl border border-border/50 bg-white/40 dark:bg-slate-900/40 p-4 space-y-3">
                 <div className="space-y-1.5">
-                  <p className="text-xs font-medium text-muted-foreground">Department</p>
+                  <p className="text-xs font-semibold text-muted">Department</p>
                   <select
                     id="tt-dept"
                     className={selectClass}
@@ -221,11 +234,9 @@ export default function SchedulerPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <p className="text-xs font-medium text-muted-foreground">
+                  <p className="text-xs font-semibold text-muted">
                     Division / Section
-                    {!deptId && (
-                      <span className="ml-1 opacity-50">(select a department first to filter)</span>
-                    )}
+                    {!deptId && <span className="ml-1 opacity-60 font-normal">(select department to filter)</span>}
                   </p>
                   <select
                     id="tt-section"
@@ -243,119 +254,131 @@ export default function SchedulerPage() {
                       ))}
                   </select>
                 </div>
-
-                <p className="text-xs text-muted-foreground">
-                  {sectionId
-                    ? '📌 Will generate timetable only for this division'
-                    : deptId
-                    ? '🏛 Will generate for all divisions in this department'
-                    : '🌐 Will generate for every section across all departments'}
-                </p>
               </div>
             </div>
 
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <label className="flex items-center gap-2.5 text-sm font-semibold cursor-pointer pt-1 text-foreground">
               <input
                 type="checkbox"
                 checked={useGenetic}
                 onChange={(e) => setUseGenetic(e.target.checked)}
+                className="w-4 h-4 rounded text-primary focus:ring-primary"
               />
-              Use genetic algorithm polish
+              <span>Enable Genetic Algorithm Optimization Polish</span>
             </label>
 
             {submitErr && (
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-400">
+              <p className="rounded-xl bg-rose-500/10 border border-rose-500/20 px-3.5 py-2.5 text-xs font-semibold text-rose-600 dark:text-rose-400">
                 {submitErr}
               </p>
             )}
 
-            <Button type="submit" disabled={generate.isPending} className="w-full">
-              {generate.isPending
-                ? 'Generating…'
-                : `Generate Timetable — ${scopeLabel}`}
+            <Button
+              type="submit"
+              disabled={generate.isPending}
+              className="w-full h-12 rounded-xl font-extrabold text-sm bg-gradient-to-r from-primary to-primary-light text-white shadow-lg shadow-primary/30 hover:opacity-95 gap-2"
+            >
+              <Sparkles size={18} />
+              {generate.isPending ? 'Synthesizing Timetable…' : `Synthesize Timetable — ${scopeLabel}`}
             </Button>
           </form>
-        </Card>
+        </GlassCard>
 
-        {/* ── Result panel ─────────────────────────────────────────────────── */}
-        <Card>
-          <h3 className="mb-4 font-semibold">Result</h3>
-
+        {/* Results Panel */}
+        <GlassCard title="Synthesis Results & Metrics" subtitle="Algorithm evaluation output" headerIcon={<Layers size={18} />}>
           {status ? (
-            <div className="space-y-3">
+            <div className="space-y-4 pt-1">
               <div className="flex flex-wrap gap-2">
-                <Badge>{status.status}</Badge>
-                <Badge variant="secondary">Entries {status._count?.entries ?? 0}</Badge>
-                <Badge variant="warning">Conflicts {status._count?.conflicts ?? 0}</Badge>
-                {status.score != null && <Badge variant="success">Score {status.score}</Badge>}
+                <Badge variant={status.status === 'PUBLISHED' ? 'success' : 'default'} className="font-bold">
+                  {status.status}
+                </Badge>
+                <Badge variant="secondary" className="font-mono font-bold">
+                  Entries: {status._count?.entries ?? 0}
+                </Badge>
+                <Badge variant={status._count?.conflicts > 0 ? 'warning' : 'success'} className="font-mono font-bold">
+                  Conflicts: {status._count?.conflicts ?? 0}
+                </Badge>
+                {status.score != null && (
+                  <Badge variant="success" className="font-mono font-bold">
+                    Score: {status.score}
+                  </Badge>
+                )}
               </div>
 
               {(status.metadata?.unassigned?.length ?? 0) > 0 && (
-                <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-                  <strong>{status.metadata.unassigned.length} sessions unscheduled</strong>
-                  <div className="mt-1 max-h-24 overflow-y-auto space-y-0.5">
-                    {status.metadata.unassigned.map(
-                      (u: { subjectCode: string; isLab: boolean }, i: number) => (
-                        <div key={i}>
-                          {u.subjectCode} {u.isLab ? '(Lab)' : '(Theory)'}
-                        </div>
-                      )
-                    )}
+                <div className="rounded-2xl border border-amber-300/60 bg-amber-500/10 p-3.5 text-xs text-amber-900 dark:text-amber-300">
+                  <strong className="flex items-center gap-1.5 font-bold mb-1">
+                    <AlertTriangle size={15} /> {status.metadata.unassigned.length} unscheduled hours
+                  </strong>
+                  <div className="max-h-24 overflow-y-auto space-y-1 font-mono">
+                    {status.metadata.unassigned.map((u: { subjectCode: string; isLab: boolean }, i: number) => (
+                      <div key={i} className="flex justify-between">
+                        <span>{u.subjectCode}</span>
+                        <span className="opacity-80">{u.isLab ? 'Lab' : 'Theory'}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
 
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2.5 pt-2">
                 <Button
-                  variant="outline" size="sm"
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl font-bold gap-1.5"
                   onClick={async () => {
                     await schedulerApi.optimize(resultId);
                     qc.invalidateQueries({ queryKey: ['scheduler-status', resultId] });
                     toast.success('Optimization started');
                   }}
                 >
-                  Optimize
+                  <RefreshCw size={14} /> Re-Optimize
                 </Button>
                 <Button
-                  variant="outline" size="sm"
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl font-bold gap-1.5"
                   onClick={async () => {
                     const res = await schedulerApi.resolveConflicts(resultId);
-                    toast.success(`Resolved ${res.data.data.resolved}`);
+                    toast.success(`Resolved ${res.data.data.resolved} conflicts`);
                     qc.invalidateQueries({ queryKey: ['conflicts', resultId] });
                   }}
                 >
-                  Resolve Conflicts
+                  <ShieldCheck size={14} /> Resolve Conflicts
                 </Button>
                 <Link to="/timetable">
-                  <Button variant="outline" size="sm">View Timetable →</Button>
+                  <Button variant="default" size="sm" className="rounded-xl font-bold gap-1.5 bg-gradient-to-r from-primary to-primary-light">
+                    Open Timetable <ArrowRight size={14} />
+                  </Button>
                 </Link>
               </div>
 
-              <div className="max-h-64 space-y-2 overflow-y-auto">
+              <div className="max-h-60 space-y-2 overflow-y-auto pt-2">
                 {(conflicts ?? status.conflicts ?? []).map(
                   (c: { id: string; type: string; severity: string; description: string }) => (
-                    <div key={c.id} className="rounded-xl border border-border/60 p-3 text-sm">
-                      <div className="mb-1 flex gap-2">
-                        <Badge variant={c.severity === 'CRITICAL' ? 'danger' : 'warning'}>
+                    <div key={c.id} className="rounded-xl border border-border/50 p-3 text-xs bg-white/40 dark:bg-slate-900/40">
+                      <div className="mb-1 flex gap-2 items-center">
+                        <Badge variant={c.severity === 'CRITICAL' ? 'danger' : 'warning'} className="font-bold">
                           {c.severity}
                         </Badge>
-                        <span className="font-medium">{c.type}</span>
+                        <span className="font-bold text-foreground">{c.type}</span>
                       </div>
-                      <p className="text-xs text-muted">{c.description}</p>
+                      <p className="text-muted font-medium">{c.description}</p>
                     </div>
                   )
                 )}
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center py-10 text-center text-sm text-muted space-y-2">
-              <p>Generate a timetable to see results and conflicts.</p>
-              <p className="text-xs opacity-60">
-                Select a specific division to generate just that section's timetable.
+            <div className="flex flex-col items-center justify-center py-16 text-center text-muted space-y-3">
+              <Cpu size={40} className="opacity-40 text-primary dark:text-cyan-accent" />
+              <p className="font-semibold text-sm">Configure options and click Synthesize Timetable</p>
+              <p className="text-xs max-w-xs opacity-70">
+                You can generate for a single division or across all departments in {user?.institute?.code || 'CHARUSAT'}.
               </p>
             </div>
           )}
-        </Card>
+        </GlassCard>
       </div>
     </div>
   );

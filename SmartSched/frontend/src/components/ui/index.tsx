@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Slot } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
+import { Loader2 } from 'lucide-react';
 import { cn } from '@/utils/cn';
 
 const buttonVariants = cva(
@@ -29,12 +30,23 @@ export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   asChild?: boolean;
+  loading?: boolean;
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, loading = false, disabled, children, ...props }, ref) => {
     const Comp = asChild ? Slot : 'button';
-    return <Comp className={cn(buttonVariants({ variant, size, className }))} ref={ref} {...props} />;
+    return (
+      <Comp
+        className={cn(buttonVariants({ variant, size, className }))}
+        ref={ref}
+        disabled={disabled || loading}
+        {...props}
+      >
+        {!asChild && loading && <Loader2 className="h-4 w-4 animate-spin" />}
+        {children}
+      </Comp>
+    );
   }
 );
 Button.displayName = 'Button';
@@ -65,9 +77,11 @@ export function Badge({
   className,
   variant = 'default',
   ...props
-}: React.HTMLAttributes<HTMLSpanElement> & { variant?: 'default' | 'success' | 'danger' | 'warning' | 'secondary' }) {
+}: React.HTMLAttributes<HTMLSpanElement> & { variant?: 'default' | 'primary' | 'outline' | 'success' | 'danger' | 'warning' | 'secondary' }) {
   const styles = {
     default: 'bg-primary/15 text-primary',
+    primary: 'bg-primary/15 text-primary',
+    outline: 'border border-border bg-transparent text-foreground',
     success: 'bg-success/15 text-success',
     danger: 'bg-danger/15 text-danger',
     warning: 'bg-warning/15 text-warning',

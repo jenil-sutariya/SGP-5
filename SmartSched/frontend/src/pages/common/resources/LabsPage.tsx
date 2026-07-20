@@ -18,8 +18,8 @@ export function LabsPage() {
   });
 
   const { data: buildings } = useQuery({
-    queryKey: ['buildings'],
-    queryFn: async () => (await roomsApi.buildings()).data.data as { id: string; name: string; code?: string; instituteId?: string }[],
+    queryKey: ['buildings', 'scoped', instituteId ?? 'all'],
+    queryFn: async () => (await roomsApi.buildings({ ...(instituteId ? { instituteId } : {}) })).data.data as { id: string; name: string; code?: string; instituteId?: string }[],
     enabled: canCreate,
   });
 
@@ -34,7 +34,7 @@ export function LabsPage() {
   const buildingOptions = (buildings ?? []).map((b) => ({
     value: b.id,
     label: b.name,
-    meta: { instituteId: b.buildingId ?? b.instituteId ?? '' },
+    meta: { instituteId: b.instituteId ?? '' },
   }));
   const departmentOptions = (departments ?? []).map((d) => ({
     value: d.id,
@@ -46,7 +46,15 @@ export function LabsPage() {
     <ResourcePage
       title="Laboratories"
       queryKey="labs"
-      listFn={async () => (await labsApi.list({ limit: 100, ...(instituteId ? { instituteId } : {}) })).data.data}
+      listFn={async (search, page, limit, departmentId) =>
+        (await labsApi.list({
+          search,
+          page,
+          limit,
+          ...(departmentId ? { departmentId } : {}),
+          ...(instituteId ? { instituteId } : {}),
+        })).data
+      }
       columns={[
         { key: 'code', label: 'Code' },
         { key: 'name', label: 'Name' },

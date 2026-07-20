@@ -2,12 +2,12 @@ import { RoleName } from '@prisma/client';
 import { AuthRequest } from '../middlewares/auth';
 import { ForbiddenError } from './AppError';
 
-/** University-wide admin */
+/** University-wide admin (Super Admin) */
 export function isSuperAdmin(role?: RoleName) {
   return role === RoleName.ADMIN;
 }
 
-/** CSPIT / DEPSTAR institute admin */
+/** Institute admin */
 export function isInstituteAdmin(role?: RoleName) {
   return role === RoleName.INSTITUTE_ADMIN;
 }
@@ -24,29 +24,30 @@ export function canManageInstitute(role?: RoleName) {
 
 /**
  * Institute filter for list queries.
- * Super admin: optional query instituteId.
- * Institute admin: forced to their instituteId.
+ * Super admin (RoleName.ADMIN): optional query instituteId.
+ * Non-super-admin with user.instituteId: forced strictly to their user.instituteId.
  */
 export function resolveInstituteScope(
   user: AuthRequest['user'],
   queryInstituteId?: string | null
 ): string | undefined {
   if (!user) throw new ForbiddenError();
-  if (isInstituteAdmin(user.role)) {
-    if (!user.instituteId) throw new ForbiddenError('Institute admin is not linked to an institute');
-    return user.instituteId;
-  }
-  if (isSuperAdmin(user.role) || user.role === RoleName.SCHEDULER) {
+  if (isSuperAdmin(user.role)) {
     return queryInstituteId || undefined;
   }
-  return user.instituteId || undefined;
+  return user.instituteId || queryInstituteId || undefined;
 }
 
+/**
+ * Asserts that the authenticated user has access to manage/view a resource
+ * belonging to resourceInstituteId.
+ */
 export function assertInstituteAccess(user: AuthRequest['user'], resourceInstituteId?: string | null) {
   if (!user) throw new ForbiddenError();
-  if (isSuperAdmin(user.role)) return;
-  if (isInstituteAdmin(user.role)) {
-    if (!user.instituteId || resourceInstituteId !== user.instituteId) {
+  if (isSuperAdmin(user.role)) return; // Super admin has global access
+
+  if (user.instituteId) {
+    if (!resourceInstituteId || resourceInstituteId !== user.instituteId) {
       throw new ForbiddenError('You can only manage data for your institute');
     }
   }

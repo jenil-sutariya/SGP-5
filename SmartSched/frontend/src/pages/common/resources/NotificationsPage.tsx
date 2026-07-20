@@ -32,7 +32,7 @@ export function NotificationsPage() {
             Loading…
           </div>
         ) : (
-          (data ?? []).map((n) => (
+          (data ?? []).map((n: any) => (
             <Card key={(n as any).id} className="p-3">
               <div className="flex items-center justify-between">
                 <div>

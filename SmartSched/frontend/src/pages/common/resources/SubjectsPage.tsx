@@ -48,7 +48,15 @@ export function SubjectsPage() {
     <ResourcePage
       title="Subjects"
       queryKey="subjects"
-      listFn={async () => (await subjectsApi.list({ limit: 100, ...(instituteId ? { instituteId } : {}) })).data.data}
+      listFn={async (search, page, limit, departmentId) =>
+        (await subjectsApi.list({
+          search,
+          page,
+          limit,
+          ...(departmentId ? { departmentId } : {}),
+          ...(instituteId ? { instituteId } : {}),
+        })).data
+      }
       columns={[
         { key: 'code', label: 'Code' },
         { key: 'name', label: 'Name' },

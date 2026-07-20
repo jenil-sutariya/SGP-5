@@ -114,7 +114,15 @@ export function FacultyPage() {
       <ResourcePage
         title="Professors"
         queryKey="faculty"
-        listFn={async () => (await facultyApi.list({ limit: 100 })).data.data}
+        listFn={async (search, page, limit, departmentId) =>
+          (await facultyApi.list({
+            search,
+            page,
+            limit,
+            ...(departmentId ? { departmentId } : {}),
+            ...(instituteId ? { instituteId } : {}),
+          })).data
+        }
         columns={[
           { key: 'employeeId', label: 'Employee ID' },
           {

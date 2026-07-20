@@ -2,6 +2,7 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { departmentsApi, institutesApi, studentsApi, sectionsApi } from '@/api';
 import { ResourcePage, useInstituteScope } from '../ResourcePage';
+import { Badge } from '@/components/ui';
 
 export function StudentsPage() {
   const { user, instituteId } = useInstituteScope();
@@ -43,8 +44,8 @@ export function StudentsPage() {
   const instituteOptions = (institutes ?? []).map((i) => ({ value: i.id, label: `${i.code} — ${i.name}` }));
 
   const { data: sections } = useQuery({
-    queryKey: ['sections'],
-    queryFn: async () => (await sectionsApi.list({ limit: 100 })).data.data as { id: string; code: string; name: string; departmentId: string }[],
+    queryKey: ['sections', 'scoped', instituteId ?? 'all'],
+    queryFn: async () => (await sectionsApi.list({ limit: 100, ...(instituteId ? { instituteId } : {}) })).data.data as { id: string; code: string; name: string; departmentId: string }[],
   });
 
   const sectionOptions = (sections ?? []).map((s) => ({
@@ -58,50 +59,55 @@ export function StudentsPage() {
     { value: 'false', label: 'Inactive' },
   ];
 
-  const [deptFilter, setDeptFilter] = React.useState('');
-
   return (
     <ResourcePage
       title="Students"
       queryKey="students"
-      extraQueryKey={[deptFilter]}
-      filters={[
-        {
-          key: 'departmentId',
-          label: 'Department',
-          options: departmentOptions,
-          value: deptFilter,
-          onChange: setDeptFilter,
-        },
-      ]}
-      listFn={async (search, page, limit) => {
-        const res = await studentsApi.list({ page, limit, search, ...(deptFilter ? { departmentId: deptFilter } : {}) });
-        return {
-          data: res.data.data,
-          total: res.data.meta?.pagination?.total ?? res.data.data.length,
-        };
-      }}
+      listFn={async (search, page, limit, departmentId) =>
+        (await studentsApi.list({
+          search,
+          page,
+          limit,
+          ...(departmentId ? { departmentId } : {}),
+          ...(instituteId ? { instituteId } : {}),
+        })).data
+      }
       columns={[
         { key: 'enrollmentNo', label: 'Enrollment' },
         {
           key: 'name',
           label: 'Name',
           render: (r) => {
-            const u = r.user as { firstName: string; lastName: string };
-            return `${u.firstName} ${u.lastName}`;
+            const u = r.user as { firstName: string; lastName: string; email?: string } | undefined;
+            if (!u) return '—';
+            return (
+              <div>
+                <p className="font-medium">{u.firstName} {u.lastName}</p>
+                {u.email && <p className="text-xs text-muted-foreground">{u.email}</p>}
+              </div>
+            );
           },
+        },
+        {
+          key: 'department',
+          label: 'Department',
+          render: (r) => (r.department as { code?: string })?.code ?? '—',
         },
         {
           key: 'section',
           label: 'Section',
           render: (r) => (r.section as { code?: string })?.code ?? '—',
         },
-        { key: 'batchYear', label: 'Batch' },
+        { key: 'batchYear', label: 'Batch Year' },
         { key: 'currentSemester', label: 'Semester' },
         {
           key: 'isActive',
           label: 'Status',
-          render: (r) => (r.isActive ? 'Active' : 'Inactive'),
+          render: (r) => (
+            <Badge variant={r.isActive ? 'success' : 'danger'}>
+              {r.isActive ? 'Active' : 'Inactive'}
+            </Badge>
+          ),
         },
       ]}
       createFields={

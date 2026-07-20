@@ -117,8 +117,14 @@ export function CoursesPage() {
       <ResourcePage
         title="Courses"
         queryKey="courses"
-        listFn={async () =>
-          (await coursesApi.list({ limit: 100, ...(instituteId ? { instituteId } : {}) })).data.data
+        listFn={async (search, page, limit, departmentId) =>
+          (await coursesApi.list({
+            search,
+            page,
+            limit,
+            ...(departmentId ? { departmentId } : {}),
+            ...(instituteId ? { instituteId } : {}),
+          })).data
         }
         columns={[
           { key: 'code', label: 'Code' },

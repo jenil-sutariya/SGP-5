@@ -18,6 +18,9 @@ export const analyticsApi = {
 export const institutesApi = {
   list: () => api.get('/institutes'),
   get: (id: string) => api.get(`/institutes/${id}`),
+  create: (data: unknown) => api.post('/institutes', data),
+  update: (id: string, data: unknown) => api.patch(`/institutes/${id}`, data),
+  remove: (id: string) => api.delete(`/institutes/${id}`),
 };
 
 export const departmentsApi = {
@@ -77,7 +80,7 @@ export const subjectsApi = {
 export const roomsApi = {
   list: (params?: Record<string, unknown>) => api.get('/rooms', { params }),
   types: () => api.get('/rooms/meta/types'),
-  buildings: () => api.get('/rooms/meta/buildings'),
+  buildings: (params?: Record<string, unknown>) => api.get('/rooms/meta/buildings', { params }),
   create: (data: unknown) => api.post('/rooms', data),
   update: (id: string, data: unknown) => api.patch(`/rooms/${id}`, data),
   remove: (id: string) => api.delete(`/rooms/${id}`),
@@ -101,8 +104,8 @@ export const sectionsApi = {
 export const academicApi = {
   years: (params?: Record<string, unknown>) => api.get('/academic-years', { params }),
   semesters: (params?: Record<string, unknown>) => api.get('/semesters', { params }),
-  days: () => api.get('/meta/days'),
-  timeSlots: () => api.get('/meta/time-slots'),
+  days: (params?: Record<string, unknown>) => api.get('/meta/days', { params }),
+  timeSlots: (params?: Record<string, unknown>) => api.get('/meta/time-slots', { params }),
   programs: (params?: Record<string, unknown>) => api.get('/meta/programs', { params }),
 };
 

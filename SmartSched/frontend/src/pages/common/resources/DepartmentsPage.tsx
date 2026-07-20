@@ -21,8 +21,14 @@ export function DepartmentsPage() {
       title="Departments"
       queryKey="departments"
       emptyMessage="No departments found for your institute"
-      listFn={async (search) =>
-        (await departmentsApi.list({ limit: 100, ...(instituteId ? { instituteId } : {}), ...(search ? { search } : {}) })).data.data
+      hideDepartmentFilter
+      listFn={async (search, page, limit) =>
+        (await departmentsApi.list({
+          search,
+          page,
+          limit,
+          ...(instituteId ? { instituteId } : {}),
+        })).data
       }
       columns={[
         {

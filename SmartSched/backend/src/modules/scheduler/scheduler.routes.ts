@@ -7,7 +7,7 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { authenticate, authorize, AuthRequest } from '../../middlewares/auth';
 import { validate } from '../../middlewares/errorHandler';
 import { generateTimetableSchema } from '../../validators/common';
-import { assertInstituteAccess } from '../../utils/instituteScope';
+import { assertInstituteAccess, resolveInstituteScope } from '../../utils/instituteScope';
 import prisma from '../../database/prisma';
 
 const router = Router();
@@ -35,7 +35,8 @@ router.post(
         assertInstituteAccess(req.user, sec.department.instituteId);
       }
     }
-    const data = await schedulerService.generate({ ...req.body, createdById: req.user?.id });
+    const instituteId = resolveInstituteScope(req.user, req.body.instituteId as string);
+    const data = await schedulerService.generate({ ...req.body, instituteId, createdById: req.user?.id });
     return ApiResponse.created(res, data, 'Timetable generated');
   })
 );

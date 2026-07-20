@@ -55,9 +55,12 @@ export class RoomService {
     return prisma.roomType.findMany({ orderBy: { name: 'asc' } });
   }
 
-  async listBuildings() {
+  async listBuildings(instituteId?: string) {
     return prisma.building.findMany({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        ...(instituteId ? { OR: [{ instituteId }, { instituteId: null }] } : {}),
+      },
       orderBy: { name: 'asc' },
       include: { institute: { select: { id: true, code: true, name: true } } },
     });

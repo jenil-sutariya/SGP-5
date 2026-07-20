@@ -45,7 +45,15 @@ export function BatchesPage() {
     <ResourcePage
       title="Student Batches / Classes"
       queryKey="batches"
-      listFn={async () => (await batchesApi.list({ limit: 100, ...(instituteId ? { instituteId } : {}) })).data.data}
+      listFn={async (search, page, limit, departmentId) =>
+        (await batchesApi.list({
+          search,
+          page,
+          limit,
+          ...(departmentId ? { departmentId } : {}),
+          ...(instituteId ? { instituteId } : {}),
+        })).data
+      }
       columns={[
         { key: 'code', label: 'Batch Code' },
         { key: 'name', label: 'Name' },

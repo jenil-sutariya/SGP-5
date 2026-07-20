@@ -75,7 +75,15 @@ export function SectionsPage() {
     <ResourcePage
       title="Sections"
       queryKey="sections"
-      listFn={async () => (await sectionsApi.list({ limit: 100, ...(instituteId ? { instituteId } : {}) })).data.data}
+      listFn={async (search, page, limit, departmentId) =>
+        (await sectionsApi.list({
+          search,
+          page,
+          limit,
+          ...(departmentId ? { departmentId } : {}),
+          ...(instituteId ? { instituteId } : {}),
+        })).data
+      }
       columns={[
         { key: 'code', label: 'Section Code' },
         { key: 'name', label: 'Name' },
@@ -98,8 +106,8 @@ export function SectionsPage() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => autoCreateMutation.mutate({ id: r.id })}
-              loading={autoCreateMutation.isPending && autoCreateMutation.variables?.id === r.id}
+              onClick={() => autoCreateMutation.mutate({ id: String((r as any).id) })}
+              loading={autoCreateMutation.isPending && (autoCreateMutation.variables as { id: string } | undefined)?.id === (r as any).id}
             >
               Auto Create Batches
             </Button>

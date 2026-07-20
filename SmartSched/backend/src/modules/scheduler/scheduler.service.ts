@@ -13,6 +13,7 @@ export class SchedulerService {
     semesterId: string;
     departmentId?: string | null;
     sectionId?: string | null;
+    instituteId?: string | null;
     name?: string;
     useGenetic?: boolean;
     createdById?: string;
@@ -77,7 +78,7 @@ export class SchedulerService {
     });
 
     try {
-      const ctx = await this.buildContext(input.semesterId, input.departmentId, input.sectionId);
+      const ctx = await this.buildContext(input.semesterId, input.departmentId, input.sectionId, input.instituteId);
       if (!ctx.requests.length) {
         throw new ValidationError('No course offerings with faculty assignments found to schedule');
       }
@@ -227,25 +228,7 @@ export class SchedulerService {
     return { resolved: critical.length, remaining };
   }
 
-  private async buildContext(semesterId: string, departmentId?: string | null, sectionId?: string | null): Promise<EngineContext> {
-    const offerings = await prisma.courseOffering.findMany({
-      where: {
-        semesterId,
-        isActive: true,
-        ...(sectionId
-          ? { sectionId }                                                    // specific division
-          : departmentId
-          ? { OR: [{ course: { departmentId } }, { subject: { departmentId } }] }  // specific dept
-          : {}),                                                             // all departments
-      },
-      include: {
-        subject: true,
-        course: true,
-        section: { include: { practicalBatches: true } },
-        assignments: { include: { faculty: true } },
-      },
-    });
-
+  private async buildContext(semesterId: string, departmentId?: string | null, sectionId?: string | null, scopedInstituteId?: string | null): Promise<EngineContext> {
     const depts = await prisma.department.findMany({ select: { id: true, code: true, instituteId: true } });
     const deptCodeMap = new Map(depts.map((d) => [d.id, d.code.toUpperCase()]));
     const deptInstMap = new Map(depts.map((d) => [d.id, d.instituteId]));
@@ -262,16 +245,36 @@ export class SchedulerService {
       }
     }
 
-    let instituteId: string | undefined = undefined;
+    let instituteId: string | undefined = scopedInstituteId ?? undefined;
     let isComputerDept = false;
     if (activeDeptId) {
       const dept = depts.find((d) => d.id === activeDeptId);
       if (dept) {
         const deptCode = dept.code.toUpperCase();
         isComputerDept = ['CSE', 'IT', 'CE'].includes(deptCode);
-        instituteId = dept.instituteId;
+        if (!instituteId) instituteId = dept.instituteId;
       }
     }
+
+    const offerings = await prisma.courseOffering.findMany({
+      where: {
+        semesterId,
+        isActive: true,
+        ...(sectionId
+          ? { sectionId }                                                    // specific division
+          : departmentId
+          ? { OR: [{ course: { departmentId } }, { subject: { departmentId } }] }  // specific dept
+          : instituteId
+          ? { OR: [{ course: { department: { instituteId } } }, { subject: { department: { instituteId } } }] }
+          : {}),                                                             // all departments
+      },
+      include: {
+        subject: true,
+        course: true,
+        section: { include: { practicalBatches: true } },
+        assignments: { include: { faculty: true } },
+      },
+    });
 
     const [days, timeSlots, rooms, laboratories, constraints] = await Promise.all([
       prisma.day.findMany({
@@ -305,6 +308,8 @@ export class SchedulerService {
                     { departmentId: null, building: { instituteId } }
                   ]
                 }
+            : instituteId
+            ? { building: { instituteId } }
             : {}),
         },
       }),
@@ -315,6 +320,8 @@ export class SchedulerService {
             ? isComputerDept
               ? { department: { code: { in: ['CSE', 'IT', 'CE'] }, instituteId } }
               : { departmentId: activeDeptId }
+            : instituteId
+            ? { department: { instituteId } }
             : {}),
         },
       }),
@@ -388,10 +395,11 @@ export class SchedulerService {
         }
       }
 
-      if (subject.requiresLab || subject.type === 'LAB') {
+      if (subject.type === 'LAB') {
+        // LAB type: Conducted in Laboratories, batch-wise, 2 continuous hours, same professor
         const sessions = 1;
         const consecutive = Math.max(2, subject.labHours || 2);
-        
+
         const batches = offering.section?.practicalBatches || [];
         if (batches.length > 0) {
           const assignedIds = offering.assignments.map((a) => a.facultyId);
@@ -402,12 +410,7 @@ export class SchedulerService {
             if (!facultyId) {
               const usedIds = new Set(assignedIds);
               const extraFaculty = deptFacultyPool.find((f) => !usedIds.has(f.id));
-              if (extraFaculty) {
-                facultyId = extraFaculty.id;
-                assignedIds.push(facultyId);
-              } else {
-                facultyId = primary.facultyId;
-              }
+              facultyId = extraFaculty ? extraFaculty.id : primary.facultyId;
             }
 
             for (let i = 0; i < sessions; i++) {
@@ -416,7 +419,7 @@ export class SchedulerService {
                 subjectId: subject.id,
                 subjectCode: subject.code,
                 subjectName: subject.name,
-                subjectType: subject.type,
+                subjectType: 'LAB',
                 difficulty: subject.difficulty,
                 facultyId,
                 sectionId: offering.sectionId,
@@ -441,7 +444,7 @@ export class SchedulerService {
               subjectId: subject.id,
               subjectCode: subject.code,
               subjectName: subject.name,
-              subjectType: subject.type,
+              subjectType: 'LAB',
               difficulty: subject.difficulty,
               facultyId: primary.facultyId,
               sectionId: offering.sectionId,
@@ -459,26 +462,26 @@ export class SchedulerService {
             });
           }
         }
-      }
+      } else if (subject.type === 'PRACTICAL') {
+        // PRACTICAL type: Conducted in Classrooms.
+        // If 1 hr per week -> 1 single lecture (1 hr) in classroom.
+        // If >= 2 hr per week -> 2 continuous hours in classroom with NO professor change.
+        const hoursPerWeek = subject.weeklyHours || subject.labHours || 2;
+        const consecutive = hoursPerWeek === 1 ? 1 : 2;
 
-      const theoryHours = subject.requiresLab
-        ? Math.max(0, subject.weeklyHours - (subject.labHours || 0))
-        : subject.weeklyHours;
-
-      for (let i = 0; i < theoryHours; i++) {
         const base = {
           courseOfferingId: offering.id,
           subjectId: subject.id,
           subjectCode: subject.code,
           subjectName: subject.name,
-          subjectType: subject.type,
+          subjectType: 'PRACTICAL',
           difficulty: subject.difficulty,
           facultyId: primary.facultyId,
           sectionId: offering.sectionId,
           practicalBatchId: null,
           departmentId: deptId,
           isLab: false,
-          consecutiveSlots: 1,
+          consecutiveSlots: consecutive,
           requiredCapacity: capacity,
         };
         const id = `req-${++reqCounter}`;
@@ -487,6 +490,31 @@ export class SchedulerService {
           ...base,
           priority: computeRequestPriority({ id, ...base }),
         });
+      } else {
+        // THEORY / TUTORIAL / Default type: Conducted in Classrooms (1 hr per session)
+        for (let i = 0; i < subject.weeklyHours; i++) {
+          const base = {
+            courseOfferingId: offering.id,
+            subjectId: subject.id,
+            subjectCode: subject.code,
+            subjectName: subject.name,
+            subjectType: subject.type || 'THEORY',
+            difficulty: subject.difficulty,
+            facultyId: primary.facultyId,
+            sectionId: offering.sectionId,
+            practicalBatchId: null,
+            departmentId: deptId,
+            isLab: false,
+            consecutiveSlots: 1,
+            requiredCapacity: capacity,
+          };
+          const id = `req-${++reqCounter}`;
+          requests.push({
+            id,
+            ...base,
+            priority: computeRequestPriority({ id, ...base }),
+          });
+        }
       }
     }
 

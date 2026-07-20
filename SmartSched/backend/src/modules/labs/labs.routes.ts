@@ -7,7 +7,8 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { authenticate, authorize, AuthRequest } from '../../middlewares/auth';
 import { validate } from '../../middlewares/errorHandler';
 import { labSchema, paginationSchema } from '../../validators/common';
-import { resolveInstituteScope } from '../../utils/instituteScope';
+import { resolveInstituteScope, assertInstituteAccess } from '../../utils/instituteScope';
+import prisma from '../../database/prisma';
 
 const managers = [RoleName.ADMIN, RoleName.INSTITUTE_ADMIN, RoleName.DEPARTMENT_HEAD] as const;
 
@@ -26,33 +27,43 @@ labRouter.get(
 
 labRouter.get(
   '/:id',
-  asyncHandler(async (req, res: Response) =>
-    ApiResponse.success(res, await labService.getById(String(req.params.id)))
-  )
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const lab = await labService.getById(String(req.params.id));
+    if (lab.department) assertInstituteAccess(req.user, lab.department.instituteId);
+    return ApiResponse.success(res, lab);
+  })
 );
 
 labRouter.post(
   '/',
   authorize(...managers),
   validate(labSchema),
-  asyncHandler(async (req, res: Response) =>
-    ApiResponse.created(res, await labService.create(req.body))
-  )
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    if (req.body.departmentId) {
+      const dept = await prisma.department.findUnique({ where: { id: req.body.departmentId } });
+      if (dept) assertInstituteAccess(req.user, dept.instituteId);
+    }
+    return ApiResponse.created(res, await labService.create(req.body));
+  })
 );
 
 labRouter.patch(
   '/:id',
   authorize(...managers),
   validate(labSchema.partial()),
-  asyncHandler(async (req, res: Response) =>
-    ApiResponse.success(res, await labService.update(String(req.params.id), req.body), 'Updated')
-  )
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const lab = await labService.getById(String(req.params.id));
+    if (lab.department) assertInstituteAccess(req.user, lab.department.instituteId);
+    return ApiResponse.success(res, await labService.update(String(req.params.id), req.body), 'Updated');
+  })
 );
 
 labRouter.delete(
   '/:id',
   authorize(RoleName.ADMIN, RoleName.INSTITUTE_ADMIN),
-  asyncHandler(async (req, res: Response) =>
-    ApiResponse.success(res, await labService.remove(String(req.params.id)))
-  )
+  asyncHandler(async (req: AuthRequest, res: Response) => {
+    const lab = await labService.getById(String(req.params.id));
+    if (lab.department) assertInstituteAccess(req.user, lab.department.instituteId);
+    return ApiResponse.success(res, await labService.remove(String(req.params.id)));
+  })
 );

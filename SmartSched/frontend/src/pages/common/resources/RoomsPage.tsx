@@ -17,8 +17,8 @@ export function RoomsPage() {
     enabled: canCreate,
   });
   const { data: buildings } = useQuery({
-    queryKey: ['buildings'],
-    queryFn: async () => (await roomsApi.buildings()).data.data as { id: string; name: string; code?: string; instituteId?: string }[],
+    queryKey: ['buildings', 'scoped', instituteId ?? 'all'],
+    queryFn: async () => (await roomsApi.buildings({ ...(instituteId ? { instituteId } : {}) })).data.data as { id: string; name: string; code?: string; instituteId?: string }[],
     enabled: canCreate,
   });
 
@@ -52,7 +52,15 @@ export function RoomsPage() {
     <ResourcePage
       title="Classrooms / Rooms"
       queryKey="rooms"
-      listFn={async () => (await roomsApi.list({ limit: 100, ...(instituteId ? { instituteId } : {}) })).data.data}
+      listFn={async (search, page, limit, departmentId) =>
+        (await roomsApi.list({
+          search,
+          page,
+          limit,
+          ...(departmentId ? { departmentId } : {}),
+          ...(instituteId ? { instituteId } : {}),
+        })).data
+      }
       columns={[
         { key: 'code', label: 'Code' },
         { key: 'name', label: 'Name' },

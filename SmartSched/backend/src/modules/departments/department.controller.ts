@@ -4,7 +4,8 @@ import { departmentService, facultyService, studentService } from './department.
 import { ApiResponse } from '../../utils/ApiResponse';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { AuthRequest } from '../../middlewares/auth';
-import { resolveInstituteScope } from '../../utils/instituteScope';
+import { resolveInstituteScope, assertInstituteAccess } from '../../utils/instituteScope';
+import prisma from '../../database/prisma';
 
 export const departmentController = {
   list: asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -12,22 +13,28 @@ export const departmentController = {
     const result = await departmentService.list({ ...req.query, instituteId });
     return ApiResponse.paginated(res, result.data, result.page, result.limit, result.total);
   }),
-  get: asyncHandler(async (req, res: Response) => {
+  get: asyncHandler(async (req: AuthRequest, res: Response) => {
     const data = await departmentService.getById(String(req.params.id));
+    assertInstituteAccess(req.user, data.instituteId);
     return ApiResponse.success(res, data);
   }),
   create: asyncHandler(async (req: AuthRequest, res: Response) => {
     if (req.user?.role === RoleName.INSTITUTE_ADMIN && req.user.instituteId) {
       req.body.instituteId = req.user.instituteId;
     }
+    assertInstituteAccess(req.user, req.body.instituteId);
     const data = await departmentService.create(req.body);
     return ApiResponse.created(res, data);
   }),
-  update: asyncHandler(async (req, res: Response) => {
+  update: asyncHandler(async (req: AuthRequest, res: Response) => {
+    const dept = await departmentService.getById(String(req.params.id));
+    assertInstituteAccess(req.user, dept.instituteId);
     const data = await departmentService.update(String(req.params.id), req.body);
     return ApiResponse.success(res, data, 'Updated');
   }),
-  remove: asyncHandler(async (req, res: Response) => {
+  remove: asyncHandler(async (req: AuthRequest, res: Response) => {
+    const dept = await departmentService.getById(String(req.params.id));
+    assertInstituteAccess(req.user, dept.instituteId);
     const data = await departmentService.remove(String(req.params.id));
     return ApiResponse.success(res, data);
   }),
@@ -39,16 +46,26 @@ export const facultyController = {
     const result = await facultyService.list({ ...req.query, instituteId } as never);
     return ApiResponse.paginated(res, result.data, result.page, result.limit, result.total);
   }),
-  get: asyncHandler(async (req, res: Response) => {
-    return ApiResponse.success(res, await facultyService.getById(String(req.params.id)));
+  get: asyncHandler(async (req: AuthRequest, res: Response) => {
+    const fac = await facultyService.getById(String(req.params.id));
+    if (fac?.department) assertInstituteAccess(req.user, fac.department.instituteId);
+    return ApiResponse.success(res, fac);
   }),
-  create: asyncHandler(async (req, res: Response) => {
+  create: asyncHandler(async (req: AuthRequest, res: Response) => {
+    if (req.body.departmentId) {
+      const dept = await prisma.department.findUnique({ where: { id: req.body.departmentId } });
+      if (dept) assertInstituteAccess(req.user, dept.instituteId);
+    }
     return ApiResponse.created(res, await facultyService.create(req.body));
   }),
-  update: asyncHandler(async (req, res: Response) => {
+  update: asyncHandler(async (req: AuthRequest, res: Response) => {
+    const fac = await facultyService.getById(String(req.params.id));
+    if (fac?.department) assertInstituteAccess(req.user, fac.department.instituteId);
     return ApiResponse.success(res, await facultyService.update(String(req.params.id), req.body), 'Updated');
   }),
-  remove: asyncHandler(async (req, res: Response) => {
+  remove: asyncHandler(async (req: AuthRequest, res: Response) => {
+    const fac = await facultyService.getById(String(req.params.id));
+    if (fac?.department) assertInstituteAccess(req.user, fac.department.instituteId);
     return ApiResponse.success(res, await facultyService.remove(String(req.params.id)));
   }),
   getAvailability: asyncHandler(async (req, res: Response) => {
@@ -101,16 +118,26 @@ export const studentController = {
     const result = await studentService.list({ ...req.query, instituteId } as never);
     return ApiResponse.paginated(res, result.data, result.page, result.limit, result.total);
   }),
-  get: asyncHandler(async (req, res: Response) => {
-    return ApiResponse.success(res, await studentService.getById(String(req.params.id)));
+  get: asyncHandler(async (req: AuthRequest, res: Response) => {
+    const stu = await studentService.getById(String(req.params.id));
+    if (stu?.department) assertInstituteAccess(req.user, stu.department.instituteId);
+    return ApiResponse.success(res, stu);
   }),
-  create: asyncHandler(async (req, res: Response) => {
+  create: asyncHandler(async (req: AuthRequest, res: Response) => {
+    if (req.body.departmentId) {
+      const dept = await prisma.department.findUnique({ where: { id: req.body.departmentId } });
+      if (dept) assertInstituteAccess(req.user, dept.instituteId);
+    }
     return ApiResponse.created(res, await studentService.create(req.body));
   }),
-  update: asyncHandler(async (req, res: Response) => {
+  update: asyncHandler(async (req: AuthRequest, res: Response) => {
+    const stu = await studentService.getById(String(req.params.id));
+    if (stu?.department) assertInstituteAccess(req.user, stu.department.instituteId);
     return ApiResponse.success(res, await studentService.update(String(req.params.id), req.body), 'Updated');
   }),
-  remove: asyncHandler(async (req, res: Response) => {
+  remove: asyncHandler(async (req: AuthRequest, res: Response) => {
+    const stu = await studentService.getById(String(req.params.id));
+    if (stu?.department) assertInstituteAccess(req.user, stu.department.instituteId);
     return ApiResponse.success(res, await studentService.remove(String(req.params.id)));
   }),
 };

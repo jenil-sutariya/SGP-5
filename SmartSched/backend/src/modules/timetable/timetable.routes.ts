@@ -42,7 +42,10 @@ router.get('/views/department/:departmentId', asyncHandler(async (req, res) => {
   return ApiResponse.success(res, await timetableService.viewByDepartment(String(req.params.departmentId), req.query.semesterId as string));
 }));
 
-router.get('/:id', asyncHandler(async (req, res) => ApiResponse.success(res, await timetableService.getById(String(req.params.id)))));
+router.get('/:id', asyncHandler(async (req: AuthRequest, res) => {
+  const instituteId = resolveInstituteScope(req.user, req.query.instituteId as string);
+  return ApiResponse.success(res, await timetableService.getById(String(req.params.id), instituteId));
+}));
 router.patch('/:id', authorize(RoleName.ADMIN, RoleName.SCHEDULER), asyncHandler(async (req, res) => ApiResponse.success(res, await timetableService.update(String(req.params.id), req.body), 'Updated')));
 router.post('/:id/publish', authorize(RoleName.ADMIN, RoleName.SCHEDULER), asyncHandler(async (req, res) => ApiResponse.success(res, await timetableService.publish(String(req.params.id)), 'Published')));
 router.delete('/:id', authorize(RoleName.ADMIN), asyncHandler(async (req, res) => ApiResponse.success(res, await timetableService.remove(String(req.params.id)))));

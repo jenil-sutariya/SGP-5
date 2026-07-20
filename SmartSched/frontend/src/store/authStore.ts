@@ -17,7 +17,7 @@ export interface AuthUser {
   role: { name: RoleName };
   departmentId?: string | null;
   instituteId?: string | null;
-  institute?: { id: string; code: string; name: string } | null;
+  institute?: { id: string; code: string; name: string; fullName?: string | null } | null;
   faculty?: { id: string } | null;
   student?: { id: string; sectionId?: string | null; batchId?: string | null } | null;
 }
