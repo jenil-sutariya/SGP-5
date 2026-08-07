@@ -25,8 +25,35 @@ export function LabsPage() {
 
   const { data: departments } = useQuery({
     queryKey: ['departments', 'scoped', instituteId ?? 'all'],
-    queryFn: async () =>
-      (await departmentsApi.list({ limit: 100, ...(instituteId ? { instituteId } : {}) })).data.data as { id: string; code: string; name: string; instituteId: string }[],
+    queryFn: async () => {
+      try {
+        const res = await departmentsApi.list({ limit: 100, ...(instituteId ? { instituteId } : {}) });
+        const raw = (res as any)?.data?.data ?? (res as any)?.data ?? [];
+        const items = Array.isArray(raw) ? raw : (raw.items ?? raw.data ?? []);
+        if (items.length > 0) return items as { id: string; code: string; name: string; instituteId: string }[];
+        const fallbackRes = await departmentsApi.list({ limit: 100 });
+        const fallbackRaw = (fallbackRes as any)?.data?.data ?? (fallbackRes as any)?.data ?? [];
+        return (Array.isArray(fallbackRaw) ? fallbackRaw : (fallbackRaw.items ?? fallbackRaw.data ?? [])) as {
+          id: string;
+          code: string;
+          name: string;
+          instituteId: string;
+        }[];
+      } catch {
+        try {
+          const fallbackRes = await departmentsApi.list({ limit: 100 });
+          const fallbackRaw = (fallbackRes as any)?.data?.data ?? (fallbackRes as any)?.data ?? [];
+          return (Array.isArray(fallbackRaw) ? fallbackRaw : (fallbackRaw.items ?? fallbackRaw.data ?? [])) as {
+            id: string;
+            code: string;
+            name: string;
+            instituteId: string;
+          }[];
+        } catch {
+          return [];
+        }
+      }
+    },
     enabled: canCreate,
   });
 

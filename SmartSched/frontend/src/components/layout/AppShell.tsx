@@ -18,9 +18,11 @@ import {
   Search,
   Sparkles,
   ChevronRight,
+  Sliders,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuthStore, useThemeStore, RoleName } from '@/store/authStore';
+import { useFeatureFlagsStore, FeatureKey } from '@/store/featureFlagsStore';
 import { Button } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import { ROLE_LABELS, UNIVERSITY } from '@/constants/university';
@@ -29,32 +31,46 @@ import { InstituteBadge } from '@/components/common/InstituteBadge';
 import { ThemeSwitcher } from '@/components/common/ThemeSwitcher';
 import { CommandPaletteModal } from '@/components/common/CommandPaletteModal';
 
-const navItems: { to: string; label: string; icon: React.ElementType; roles?: RoleName[]; badge?: string }[] = [
+const navItems: {
+  to: string;
+  label: string;
+  icon: React.ElementType;
+  roles?: RoleName[];
+  badge?: string;
+  featureKey?: FeatureKey;
+}[] = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/institutes', label: 'Institutes', icon: Building2, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'SCHEDULER'] },
-  { to: '/departments', label: 'Departments', icon: Building2, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD', 'SCHEDULER'] },
-  { to: '/batches', label: 'Batches / Classes', icon: GraduationCap, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD'] },
-  { to: '/sections', label: 'Sections & Batches', icon: Users, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD'] },
-  { to: '/faculty', label: 'Professors', icon: Users, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD', 'SCHEDULER'] },
-  { to: '/students', label: 'Students', icon: GraduationCap, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD'] },
-  { to: '/courses', label: 'Courses', icon: BookOpen, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD', 'SCHEDULER'] },
-  { to: '/subjects', label: 'Subjects', icon: BookOpen, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD', 'SCHEDULER'] },
-  { to: '/rooms', label: 'Classrooms', icon: DoorOpen, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD', 'SCHEDULER'] },
-  { to: '/labs', label: 'Labs', icon: FlaskConical, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD', 'SCHEDULER'] },
-  { to: '/timetable', label: 'My Timetable', icon: CalendarDays, badge: 'Live' },
-  { to: '/scheduler', label: 'Generate AI', icon: Cpu, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'SCHEDULER', 'DEPARTMENT_HEAD'], badge: 'AI' },
-  { to: '/notifications', label: 'Notifications', icon: Bell },
+  { to: '/institutes', label: 'Institutes', icon: Building2, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'SCHEDULER'], featureKey: 'institutes' },
+  { to: '/departments', label: 'Departments', icon: Building2, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD', 'SCHEDULER'], featureKey: 'departments' },
+  { to: '/batches', label: 'Batches / Classes', icon: GraduationCap, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD'], featureKey: 'batches' },
+  { to: '/sections', label: 'Sections & Batches', icon: Users, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD'], featureKey: 'sections' },
+  { to: '/faculty', label: 'Professors', icon: Users, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD', 'SCHEDULER'], featureKey: 'faculty' },
+  { to: '/students', label: 'Students', icon: GraduationCap, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD'], featureKey: 'students' },
+  { to: '/courses', label: 'Courses', icon: BookOpen, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD', 'SCHEDULER'], featureKey: 'courses' },
+  { to: '/subjects', label: 'Subjects', icon: BookOpen, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD', 'SCHEDULER'], featureKey: 'subjects' },
+  { to: '/rooms', label: 'Classrooms', icon: DoorOpen, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD', 'SCHEDULER'], featureKey: 'rooms' },
+  { to: '/labs', label: 'Labs', icon: FlaskConical, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD', 'SCHEDULER'], featureKey: 'labs' },
+  { to: '/timetable', label: 'My Timetable', icon: CalendarDays, badge: 'Live', featureKey: 'timetable' },
+  { to: '/scheduler', label: 'Generate AI', icon: Cpu, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'SCHEDULER', 'DEPARTMENT_HEAD'], badge: 'AI', featureKey: 'scheduler' },
+  { to: '/notifications', label: 'Notifications', icon: Bell, featureKey: 'notifications' },
+  { to: '/master-admin', label: 'Feature Manager', icon: Sliders, roles: ['ADMIN'], badge: 'Master' },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuthStore();
   const { theme } = useThemeStore();
+  const { flags, fetchFlags } = useFeatureFlagsStore();
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState('');
   const role = user?.role?.name;
+  const isAdmin = role === 'ADMIN' || role === 'INSTITUTE_ADMIN';
+
+  useEffect(() => {
+    fetchFlags();
+  }, [fetchFlags]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -77,7 +93,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  const filtered = navItems.filter((n) => !n.roles || (role && n.roles.includes(role)));
+  const filtered = navItems.filter((n) => {
+    // Role filter
+    if (n.roles && (!role || !n.roles.includes(role))) return false;
+    // Feature flag filter: if feature disabled & user is not admin, hide navigation item
+    if (n.featureKey && flags[n.featureKey] === false && !isAdmin) return false;
+    return true;
+  });
   const instituteCode = user?.institute?.code || 'CHARUSAT';
 
   const Sidebar = (
@@ -124,13 +146,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               )}
               <div className="relative z-10 flex items-center gap-3">
                 <item.icon size={18} className={cn('transition-transform group-hover:scale-110', isActive ? 'text-white' : 'text-primary/70 dark:text-cyan-accent/70')} />
-                <span>{item.label}</span>
+                <span className={cn(item.featureKey && flags[item.featureKey] === false && 'line-through opacity-70')}>{item.label}</span>
               </div>
-              {item.badge && (
+              {item.featureKey && flags[item.featureKey] === false ? (
+                <span className="relative z-10 text-[9px] font-extrabold px-1.5 py-0.5 rounded-full uppercase tracking-wider bg-rose-500/20 text-rose-600 dark:text-rose-400">
+                  OFF
+                </span>
+              ) : item.badge ? (
                 <span className={cn('relative z-10 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider', isActive ? 'bg-white/20 text-white' : 'bg-gold/15 text-gold')}>
                   {item.badge}
                 </span>
-              )}
+              ) : null}
             </NavLink>
           );
         })}

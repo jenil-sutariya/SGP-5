@@ -12,6 +12,8 @@ import TimetablePage from '@/pages/Timetable/TimetablePage';
 import SchedulerPage from '@/pages/Scheduler/SchedulerPage';
 import SettingsPage  from '@/pages/Settings/SettingsPage';
 import ProfilePage   from '@/pages/Profile/ProfilePage';
+import MasterAdminPage from '@/pages/MasterAdmin/MasterAdminPage';
+import { FeatureGuard } from '@/components/common/FeatureGuard';
 
 // Resource pages (CRUD for each domain)
 import {
@@ -30,6 +32,7 @@ import {
 
 const manageRoles: RoleName[]        = ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD', 'SCHEDULER'];
 const studentManageRoles: RoleName[] = ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD'];
+const masterAdminRoles: RoleName[]   = ['ADMIN'];
 
 function Protected({ roles }: { roles?: RoleName[] }) {
   const { accessToken, user } = useAuthStore();
@@ -53,29 +56,34 @@ export default function AppRouter() {
       <Route element={<Protected />}>
         <Route path="/"               element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard"      element={<DashboardPage />} />
-        <Route path="/timetable"      element={<TimetablePage />} />
-        <Route path="/notifications"  element={<NotificationsPage />} />
+        <Route path="/timetable"      element={<FeatureGuard featureKey="timetable"><TimetablePage /></FeatureGuard>} />
+        <Route path="/notifications"  element={<FeatureGuard featureKey="notifications"><NotificationsPage /></FeatureGuard>} />
         <Route path="/settings"       element={<SettingsPage />} />
         <Route path="/profile"        element={<ProfilePage />} />
       </Route>
 
+      {/* Master Admin Feature Control */}
+      <Route element={<Protected roles={masterAdminRoles} />}>
+        <Route path="/master-admin"   element={<MasterAdminPage />} />
+      </Route>
+
       {/* Management routes — admins, heads, scheduler */}
       <Route element={<Protected roles={manageRoles} />}>
-        <Route path="/institutes"     element={<InstitutesPage />} />
-        <Route path="/departments"    element={<DepartmentsPage />} />
-        <Route path="/faculty"        element={<FacultyPage />} />
-        <Route path="/courses"        element={<CoursesPage />} />
-        <Route path="/subjects"       element={<SubjectsPage />} />
-        <Route path="/rooms"          element={<RoomsPage />} />
-        <Route path="/labs"           element={<LabsPage />} />
-        <Route path="/scheduler"      element={<SchedulerPage />} />
+        <Route path="/institutes"     element={<FeatureGuard featureKey="institutes"><InstitutesPage /></FeatureGuard>} />
+        <Route path="/departments"    element={<FeatureGuard featureKey="departments"><DepartmentsPage /></FeatureGuard>} />
+        <Route path="/faculty"        element={<FeatureGuard featureKey="faculty"><FacultyPage /></FeatureGuard>} />
+        <Route path="/courses"        element={<FeatureGuard featureKey="courses"><CoursesPage /></FeatureGuard>} />
+        <Route path="/subjects"       element={<FeatureGuard featureKey="subjects"><SubjectsPage /></FeatureGuard>} />
+        <Route path="/rooms"          element={<FeatureGuard featureKey="rooms"><RoomsPage /></FeatureGuard>} />
+        <Route path="/labs"           element={<FeatureGuard featureKey="labs"><LabsPage /></FeatureGuard>} />
+        <Route path="/scheduler"      element={<FeatureGuard featureKey="scheduler"><SchedulerPage /></FeatureGuard>} />
       </Route>
 
       {/* Student management — admins and department heads */}
       <Route element={<Protected roles={studentManageRoles} />}>
-        <Route path="/batches"        element={<BatchesPage />} />
-        <Route path="/sections"       element={<SectionsPage />} />
-        <Route path="/students"       element={<StudentsPage />} />
+        <Route path="/batches"        element={<FeatureGuard featureKey="batches"><BatchesPage /></FeatureGuard>} />
+        <Route path="/sections"       element={<FeatureGuard featureKey="sections"><SectionsPage /></FeatureGuard>} />
+        <Route path="/students"       element={<FeatureGuard featureKey="students"><StudentsPage /></FeatureGuard>} />
       </Route>
 
       {/* Fallback */}

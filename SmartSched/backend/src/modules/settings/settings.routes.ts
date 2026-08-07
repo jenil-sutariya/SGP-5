@@ -12,7 +12,7 @@ router.use(authenticate);
 router.get('/',       asyncHandler(async (_req, res) =>
   ApiResponse.success(res, await settingsService.listGlobal())
 ));
-router.put('/:key',   authorize(RoleName.ADMIN), asyncHandler(async (req, res) =>
+router.put('/:key',   authorize(RoleName.ADMIN, RoleName.INSTITUTE_ADMIN), asyncHandler(async (req, res) =>
   ApiResponse.success(res, await settingsService.upsertGlobal(
     String(req.params.key),
     req.body.value,

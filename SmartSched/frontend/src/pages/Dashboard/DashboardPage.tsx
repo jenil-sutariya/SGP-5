@@ -28,6 +28,7 @@ import {
   Activity,
   CheckCircle2,
   Clock,
+  Sliders,
 } from 'lucide-react';
 import { analyticsApi } from '@/api';
 import { Button, Skeleton, Badge } from '@/components/ui';
@@ -97,6 +98,15 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            {user?.role?.name === 'ADMIN' && (
+              <Button
+                variant="outline"
+                className="rounded-xl gap-2 font-bold text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/10"
+                onClick={() => navigate('/master-admin')}
+              >
+                <Sliders size={16} /> Feature Toggles
+              </Button>
+            )}
             <Button
               variant="default"
               className="rounded-xl gap-2 font-bold shadow-lg shadow-primary/25 bg-gradient-to-r from-primary to-primary-light hover:opacity-95"

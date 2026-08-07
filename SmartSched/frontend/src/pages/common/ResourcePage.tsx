@@ -65,14 +65,12 @@ export function FormField({
 }) {
   if (field.type === 'select') {
     const parentValue = field.dependsOn ? (form[field.dependsOn.field] ?? '') : '';
-    const visibleOptions = field.dependsOn && parentValue
-      ? (field.options ?? []).filter(
-          (o) => {
-            const metaVal = String(o.meta?.[field.dependsOn!.metaKey] ?? '').trim().toLowerCase();
-            const parentValStr = String(parentValue).trim().toLowerCase();
-            return metaVal === parentValStr;
-          }
-        )
+    const visibleOptions = field.dependsOn
+      ? (field.options ?? []).filter((o) => {
+          if (!parentValue) return true;
+          if (!o.meta || !o.meta[field.dependsOn!.metaKey]) return true;
+          return String(o.meta[field.dependsOn!.metaKey]).trim().toLowerCase() === String(parentValue).trim().toLowerCase();
+        })
       : (field.options ?? []);
 
     return (
