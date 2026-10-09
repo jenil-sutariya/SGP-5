@@ -98,7 +98,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            {user?.role?.name === 'ADMIN' && (
+            {user?.email?.toLowerCase() === 'masteradmin@charusat.edu.in' && (
               <Button
                 variant="outline"
                 className="rounded-xl gap-2 font-bold text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/10"

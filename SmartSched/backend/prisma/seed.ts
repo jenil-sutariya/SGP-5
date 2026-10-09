@@ -248,12 +248,24 @@ export async function runSeed() {
   }
   const classroomType = await prisma.roomType.findUniqueOrThrow({ where: { name: RoomTypeName.CLASSROOM } });
 
-  // ── University Admin + Scheduler ──────────────────────────────────────────
+  // ── University Admin + Master Admin + Scheduler ──────────────────────────
   const uniAdmin = await prisma.user.create({
     data: {
       email: 'admin@charusat.edu.in',
       passwordHash: await hash('Admin@123'),
       firstName: 'CHARUSAT',
+      lastName: 'Admin',
+      roleId: roleMap[RoleName.ADMIN],
+      emailVerified: true,
+      settings: { create: {} },
+    },
+  });
+
+  await prisma.user.create({
+    data: {
+      email: 'masteradmin@charusat.edu.in',
+      passwordHash: await hash('Admin@123'),
+      firstName: 'Master',
       lastName: 'Admin',
       roleId: roleMap[RoleName.ADMIN],
       emailVerified: true,
@@ -975,6 +987,7 @@ export async function runSeed() {
   console.log('──────────────────────────────────────────────');
   console.log('  🔑 Login Credentials:');
   console.log('──────────────────────────────────────────────');
+  console.log('  Master Admin       : masteradmin@charusat.edu.in    / Admin@123');
   console.log('  University Admin   : admin@charusat.edu.in          / Admin@123');
   console.log('  CSPIT Admin        : admin.cspit@charusat.edu.in    / Admin@123');
   console.log('  DEPSTAR Admin      : admin.depstar@charusat.edu.in  / Admin@123');

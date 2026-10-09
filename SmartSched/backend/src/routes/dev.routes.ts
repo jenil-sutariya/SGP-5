@@ -69,6 +69,7 @@ router.post('/reset-seed', async (_req: Request, res: Response) => {
     send('✅ SEED COMPLETE');
     send('');
     send('Login credentials:');
+    send('  masteradmin@charusat.edu.in   / Admin@123');
     send('  admin@charusat.edu.in         / Admin@123');
     send('  admin.cspit@charusat.edu.in   / Admin@123');
     send('  admin.depstar@charusat.edu.in / Admin@123');

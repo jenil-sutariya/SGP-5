@@ -36,6 +36,7 @@ const navItems: {
   label: string;
   icon: React.ElementType;
   roles?: RoleName[];
+  emails?: string[];
   badge?: string;
   featureKey?: FeatureKey;
 }[] = [
@@ -53,7 +54,7 @@ const navItems: {
   { to: '/timetable', label: 'My Timetable', icon: CalendarDays, badge: 'Live', featureKey: 'timetable' },
   { to: '/scheduler', label: 'Generate AI', icon: Cpu, roles: ['ADMIN', 'INSTITUTE_ADMIN', 'SCHEDULER', 'DEPARTMENT_HEAD'], badge: 'AI', featureKey: 'scheduler' },
   { to: '/notifications', label: 'Notifications', icon: Bell, featureKey: 'notifications' },
-  { to: '/master-admin', label: 'Feature Manager', icon: Sliders, roles: ['ADMIN'], badge: 'Master' },
+  { to: '/master-admin', label: 'Feature Manager', icon: Sliders, emails: ['masteradmin@charusat.edu.in'], badge: 'Master' },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -94,10 +95,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   const filtered = navItems.filter((n) => {
+    // Email filter
+    if (n.emails && (!user?.email || !n.emails.includes(user.email.toLowerCase()))) return false;
     // Role filter
     if (n.roles && (!role || !n.roles.includes(role))) return false;
-    // Feature flag filter: if feature disabled & user is not admin, hide navigation item
-    if (n.featureKey && flags[n.featureKey] === false && !isAdmin) return false;
+    // Feature flag filter: if feature disabled, hide navigation item completely
+    if (n.featureKey && flags[n.featureKey] === false) return false;
     return true;
   });
   const instituteCode = user?.institute?.code || 'CHARUSAT';
@@ -146,13 +149,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               )}
               <div className="relative z-10 flex items-center gap-3">
                 <item.icon size={18} className={cn('transition-transform group-hover:scale-110', isActive ? 'text-white' : 'text-primary/70 dark:text-cyan-accent/70')} />
-                <span className={cn(item.featureKey && flags[item.featureKey] === false && 'line-through opacity-70')}>{item.label}</span>
+                <span>{item.label}</span>
               </div>
-              {item.featureKey && flags[item.featureKey] === false ? (
-                <span className="relative z-10 text-[9px] font-extrabold px-1.5 py-0.5 rounded-full uppercase tracking-wider bg-rose-500/20 text-rose-600 dark:text-rose-400">
-                  OFF
-                </span>
-              ) : item.badge ? (
+              {item.badge ? (
                 <span className={cn('relative z-10 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider', isActive ? 'bg-white/20 text-white' : 'bg-gold/15 text-gold')}>
                   {item.badge}
                 </span>

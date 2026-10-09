@@ -84,6 +84,7 @@ App: `http://localhost:5173`
 
 | Role | Email | Password |
 | --- | --- | --- |
+| Master Admin (Feature Manager) | masteradmin@charusat.edu.in | Admin@123 |
 | Admin | admin@charusat.edu.in | Admin@123 |
 | Timetable Officer | timetable@charusat.edu.in | Scheduler@123 |
 | HOD (CE) | hod.ce@charusat.edu.in | Head@1234 |

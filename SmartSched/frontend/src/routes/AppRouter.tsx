@@ -32,12 +32,13 @@ import {
 
 const manageRoles: RoleName[]        = ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD', 'SCHEDULER'];
 const studentManageRoles: RoleName[] = ['ADMIN', 'INSTITUTE_ADMIN', 'DEPARTMENT_HEAD'];
-const masterAdminRoles: RoleName[]   = ['ADMIN'];
+const masterAdminEmails: string[]    = ['masteradmin@charusat.edu.in'];
 
-function Protected({ roles }: { roles?: RoleName[] }) {
+function Protected({ roles, allowedEmails }: { roles?: RoleName[]; allowedEmails?: string[] }) {
   const { accessToken, user } = useAuthStore();
   if (!accessToken || !user) return <Navigate to="/login" replace />;
   if (roles && !roles.includes(user.role.name)) return <Navigate to="/dashboard" replace />;
+  if (allowedEmails && !allowedEmails.includes(user.email.toLowerCase())) return <Navigate to="/dashboard" replace />;
   return (
     <AppShell>
       <Outlet />
@@ -63,7 +64,7 @@ export default function AppRouter() {
       </Route>
 
       {/* Master Admin Feature Control */}
-      <Route element={<Protected roles={masterAdminRoles} />}>
+      <Route element={<Protected allowedEmails={masterAdminEmails} />}>
         <Route path="/master-admin"   element={<MasterAdminPage />} />
       </Route>
 
