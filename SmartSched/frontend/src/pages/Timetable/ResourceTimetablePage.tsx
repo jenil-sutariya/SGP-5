@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, CalendarDays, DoorOpen, FlaskConical, RefreshCw, Printer } from 'lucide-react';
 import { timetableApi } from '@/api';
-import { Button, Skeleton } from '@/components/ui';
+import { Button, Select, Skeleton } from '@/components/ui';
 import { useAuthStore } from '@/store/authStore';
 import { buildResourceTimeline, periodsOverlap, type ResourcePeriod } from './resourceTimeline';
 
@@ -46,6 +46,7 @@ type ResourceSchedule = {
     };
   }[];
 };
+
 const dateLabel = (date: string) =>
   new Date(date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 
@@ -57,6 +58,7 @@ export default function ResourceTimetablePage({ kind }: { kind: 'room' | 'lab' }
   const listPath = kind === 'room' ? '/rooms' : '/labs';
   const label = kind === 'room' ? 'Classroom' : 'Laboratory';
   const Icon = kind === 'room' ? DoorOpen : FlaskConical;
+
   const { data, isLoading, isError, error, isFetching, refetch } = useQuery({
     queryKey: ['resource-timetable', user?.id, kind, resourceId, semesterId, week],
     enabled: !!resourceId,
@@ -65,12 +67,14 @@ export default function ResourceTimetablePage({ kind }: { kind: 'room' | 'lab' }
         .data as ResourceSchedule,
     retry: false,
   });
+
   const days = useMemo(() => {
     const byName = new Map<string, Day>();
     for (const day of [...(data?.days ?? []), ...(data?.entries.map((entry) => entry.day) ?? [])])
       byName.set(day.name, day);
     return [...byName.values()].sort((a, b) => a.order - b.order);
   }, [data]);
+
   const periods = useMemo(
     () =>
       buildResourceTimeline([
@@ -79,59 +83,76 @@ export default function ResourceTimetablePage({ kind }: { kind: 'room' | 'lab' }
       ]),
     [data]
   );
+
   const selectedSemester = data?.semesters.find(
     (semester) => semester.id === data.selectedSemesterId
   );
 
   return (
-    <div className="space-y-5 pb-6">
+    <div className="space-y-5">
       <Link
         to={listPath}
-        className="no-print inline-flex items-center gap-2 text-sm text-muted hover:text-primary"
+        className="no-print inline-flex items-center gap-2 text-xs font-semibold text-muted hover:text-primary dark:hover:text-cyan-accent transition-colors"
       >
-        <ArrowLeft size={16} /> Back to {kind === 'room' ? 'classrooms' : 'laboratories'}
+        <ArrowLeft size={15} aria-hidden="true" /> Back to{' '}
+        {kind === 'room' ? 'classrooms' : 'laboratories'}
       </Link>
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex items-center gap-3">
-          <div className="rounded-xl bg-primary/10 p-3 text-primary">
-            <Icon size={23} />
+
+      <header className="surface-card rounded-2xl p-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-3.5">
+          <div className="rounded-xl bg-primary/10 dark:bg-blue-500/15 p-3 text-primary dark:text-cyan-accent shrink-0">
+            <Icon size={22} aria-hidden="true" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold">
+            <h1 className="font-display text-xl sm:text-2xl font-bold tracking-tight text-foreground">
               {data ? data.resource.code + ' · ' + data.resource.name : label + ' timetable'}
             </h1>
-            <p className="text-sm text-muted mt-1">
+            <p className="text-sm text-muted mt-0.5">
               {data
                 ? `${data.resource.institute?.code ?? 'Institute unassigned'} · ${data.resource.building} · Capacity ${data.resource.capacity}`
-                : 'Weekly resource timetable'}
+                : 'Weekly resource utilization'}
             </p>
           </div>
         </div>
-        <div className="no-print flex flex-wrap items-end gap-2">
+
+        <div className="no-print flex flex-wrap items-end gap-2.5">
           {data && data.semesters.length > 0 && (
-            <label className="text-xs font-medium text-muted">
+            <label className="text-xs font-semibold text-muted">
               <span className="block mb-1">Academic period</span>
-              <select
-                className="h-10 max-w-full rounded-lg border border-border bg-white px-3 text-sm text-foreground dark:bg-slate-900"
+              <Select
+                className="w-auto min-w-48"
                 value={semesterId || data.selectedSemesterId || ''}
-                onChange={(event) => { setSemesterId(event.target.value); setWeek('auto'); }}
+                onChange={(event) => {
+                  setSemesterId(event.target.value);
+                  setWeek('auto');
+                }}
               >
                 {data.semesters.map((semester) => (
                   <option value={semester.id} key={semester.id}>
                     {semester.academicYear.name} · {semester.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
           )}
-          <label className="text-xs">Week containing<input type="date" aria-label="Resource week" className="block h-10 rounded-lg border border-border bg-background p-2" value={week === 'auto' ? data?.week || '' : week} onChange={e=>setWeek(e.target.value || 'auto')}/></label>
+          <label className="text-xs font-semibold text-muted">
+            <span className="block mb-1">Week containing</span>
+            <input
+              type="date"
+              aria-label="Resource week"
+              className="block h-10 rounded-xl border border-border bg-white dark:bg-slate-900 px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
+              value={week === 'auto' ? data?.week || '' : week}
+              onChange={(e) => setWeek(e.target.value || 'auto')}
+            />
+          </label>
           <Button
             variant="outline"
             onClick={() => refetch()}
             disabled={isFetching}
             className="gap-2"
           >
-            <RefreshCw size={15} className={isFetching ? 'animate-spin' : ''} /> Refresh
+            <RefreshCw size={15} className={isFetching ? 'animate-spin' : ''} aria-hidden="true" />
+            Refresh
           </Button>
           <Button
             variant="outline"
@@ -139,7 +160,7 @@ export default function ResourceTimetablePage({ kind }: { kind: 'room' | 'lab' }
             disabled={!data}
             className="gap-2"
           >
-            <Printer size={15} /> Print
+            <Printer size={15} aria-hidden="true" /> Print
           </Button>
         </div>
       </header>
@@ -147,9 +168,9 @@ export default function ResourceTimetablePage({ kind }: { kind: 'room' | 'lab' }
       {isLoading ? (
         <Skeleton className="h-96 rounded-2xl" />
       ) : isError || !data ? (
-        <div role="alert" className="rounded-xl border border-border p-6">
-          <h2 className="font-semibold">Unable to load this timetable</h2>
-          <p className="text-sm text-muted mt-2">
+        <div role="alert" className="surface-card rounded-2xl p-6">
+          <h2 className="font-display font-semibold text-lg">Unable to load this timetable</h2>
+          <p className="text-sm text-muted mt-1.5">
             {(error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
               'Please try again.'}
           </p>
@@ -159,31 +180,37 @@ export default function ResourceTimetablePage({ kind }: { kind: 'room' | 'lab' }
         </div>
       ) : (
         <>
-          <div className="rounded-xl border border-border bg-white p-4 dark:bg-slate-900 flex flex-col gap-2 sm:flex-row sm:justify-between">
+          <div className="surface-card rounded-2xl p-4 sm:p-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-medium">
-                {data.entries.filter(entry=>!entry.cancellationReason).length} booked periods · All departments using this{' '}
-                {kind === 'room' ? 'classroom' : 'lab'}
+              <p className="text-sm font-semibold text-foreground tabular-nums">
+                {data.entries.filter((entry) => !entry.cancellationReason).length} booked periods ·
+                All departments using this {kind === 'room' ? 'classroom' : 'lab'}
               </p>
               {selectedSemester && (
                 <p className="text-xs text-muted mt-1">
                   {dateLabel(selectedSemester.startDate)} – {dateLabel(selectedSemester.endDate)}.
-                  Includes bookings from semesters that overlap these dates.
+                  Includes bookings from overlapping semesters.
                 </p>
               )}
-              <p className="text-xs text-muted mt-1">
-                Generated and published teaching is shown for this week. Cancelled sessions do not reserve this resource.
+              <p className="text-xs text-muted mt-0.5">
+                Generated and published teaching is shown for this week. Cancelled sessions do not
+                reserve this resource.
               </p>
             </div>
-            <div className="flex gap-3 items-center text-xs">
-              <span className="text-amber-700 dark:text-amber-300">● Generated</span>
-              <span className="text-emerald-700 dark:text-emerald-300">● Published</span>
+            <div className="flex gap-4 items-center text-xs font-semibold shrink-0">
+              <span className="inline-flex items-center gap-1.5 text-amber-700 dark:text-amber-300">
+                <span className="h-2 w-2 rounded-full bg-amber-500" /> Generated
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-emerald-700 dark:text-emerald-300">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" /> Published
+              </span>
             </div>
           </div>
+
           {data.entries.length === 0 && (
-            <div className="rounded-xl border border-dashed border-border p-6 text-center">
-              <CalendarDays size={25} className="mx-auto mb-2 text-muted" />
-              <h2 className="font-medium">No bookings for this academic period</h2>
+            <div className="surface-card rounded-2xl border-dashed p-8 text-center">
+              <CalendarDays size={26} className="mx-auto mb-2 text-muted" aria-hidden="true" />
+              <h2 className="font-semibold text-foreground">No bookings for this academic period</h2>
               <p className="text-sm text-muted mt-1">
                 {data.semesters.length
                   ? 'Choose another period to view its bookings.'
@@ -191,36 +218,37 @@ export default function ResourceTimetablePage({ kind }: { kind: 'room' | 'lab' }
               </p>
             </div>
           )}
+
           {periods.length > 0 && days.length > 0 && (
-            <div className="print-area overflow-x-auto rounded-2xl border border-border bg-white dark:bg-slate-900">
+            <div className="print-area surface-card overflow-x-auto rounded-2xl">
               <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
                 <caption className="sr-only">Weekly timetable for {data.resource.code}</caption>
                 <thead>
-                  <tr className="bg-slate-50 dark:bg-slate-800">
-                    <th scope="col" className="w-28 p-3 text-left border-b border-border">
+                  <tr className="bg-surface-subtle text-foreground border-b border-border">
+                    <th scope="col" className="w-28 p-3 text-left text-xs font-bold uppercase tracking-wider text-muted">
                       Time
                     </th>
                     {days.map((day) => (
                       <th
                         scope="col"
                         key={day.name}
-                        className="p-3 border-b border-l border-border text-left capitalize"
+                        className="p-3 border-l border-border text-left font-display font-bold capitalize"
                       >
                         {day.name.toLowerCase()}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-border">
                   {periods.map((period) => (
                     <tr key={period.startTime + period.endTime}>
                       <th
                         scope="row"
-                        className="p-3 align-top text-left text-xs font-medium border-b border-border"
+                        className="p-3 align-top text-left text-xs font-mono font-semibold bg-surface-subtle/50 tabular-nums"
                       >
                         {period.startTime}
                         <br />
-                        <span className="text-muted">{period.endTime}</span>
+                        <span className="text-muted font-normal">{period.endTime}</span>
                       </th>
                       {days.map((day) => {
                         const bookings = data.entries.filter(
@@ -228,41 +256,44 @@ export default function ResourceTimetablePage({ kind }: { kind: 'room' | 'lab' }
                             entry.day.name === day.name && periodsOverlap(entry.timeSlot, period)
                         );
                         return (
-                          <td
-                            key={day.name}
-                            className="p-2 align-top border-l border-b border-border"
-                          >
+                          <td key={day.name} className="p-2 align-top border-l border-border">
                             {bookings.length ? (
                               <div className="space-y-2">
                                 {bookings.map((entry) => (
                                   <article
                                     key={entry.id}
-                                    className={`rounded-lg border p-2.5 ${entry.timetable.status === 'PUBLISHED' ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/30' : 'border-amber-200 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/30'}`}
+                                    className={`rounded-xl border border-l-4 p-2.5 ${
+                                      entry.timetable.status === 'PUBLISHED'
+                                        ? 'border-emerald-200 border-l-emerald-600 bg-emerald-50/75 dark:border-emerald-800/60 dark:border-l-emerald-400 dark:bg-emerald-950/30'
+                                        : 'border-amber-200 border-l-amber-600 bg-amber-50/75 dark:border-amber-800/60 dark:border-l-amber-400 dark:bg-amber-950/30'
+                                    }`}
                                   >
-                                    {entry.cancellationReason && <p className="text-xs font-bold text-red-700 dark:text-red-300">Cancelled · {entry.cancellationReason}</p>}
-                                    <p className="font-semibold text-xs break-words">
+                                    {entry.cancellationReason && (
+                                      <p className="text-xs font-bold text-red-700 dark:text-red-300">
+                                        Cancelled · {entry.cancellationReason}
+                                      </p>
+                                    )}
+                                    <p className="font-display font-bold text-xs text-foreground break-words">
                                       {entry.courseOffering.subject.code}
                                     </p>
-                                    <p className="text-xs mt-1 break-words">
+                                    <p className="text-xs text-foreground/90 mt-0.5 break-words">
                                       {entry.courseOffering.subject.name}
                                     </p>
-                                    <p className="text-xs text-muted mt-2">
+                                    <p className="text-xs text-muted mt-1.5">
                                       {entry.faculty.user.firstName} {entry.faculty.user.lastName}
                                     </p>
-                                    <p className="text-xs mt-1 font-medium">
+                                    <p className="text-xs mt-1 font-medium text-foreground">
                                       {entry.section?.department.code} ·{' '}
                                       {entry.section?.name ?? 'No division'}
-                                      {entry.practicalBatch
-                                        ? ' · ' + entry.practicalBatch.name
-                                        : ''}
+                                      {entry.practicalBatch ? ' · ' + entry.practicalBatch.name : ''}
                                     </p>
-                                    <p className="text-[11px] text-muted mt-2">
+                                    <p className="text-[11px] font-mono text-muted mt-1.5 tabular-nums">
                                       {entry.timeSlot.startTime}–{entry.timeSlot.endTime} ·{' '}
                                       {entry.timetable.status === 'PUBLISHED'
                                         ? 'Published'
                                         : 'Generated'}
                                     </p>
-                                    <p className="text-[11px] text-muted mt-1 break-words">
+                                    <p className="text-[11px] text-muted mt-0.5 break-words">
                                       {entry.timetable.name} · {entry.timetable.semester.name}
                                     </p>
                                   </article>

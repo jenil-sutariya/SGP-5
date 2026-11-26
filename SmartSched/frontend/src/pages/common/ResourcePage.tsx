@@ -2,8 +2,17 @@ import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { Pencil, ArrowUpDown, ChevronUp, ChevronDown, Plus, Search, Filter, Trash2, X } from 'lucide-react';
-import { Button, Input, Badge, Skeleton } from '@/components/ui';
+import {
+  Pencil,
+  ArrowUpDown,
+  ChevronUp,
+  ChevronDown,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react';
+import { Button, Input, Select, Label, Skeleton } from '@/components/ui';
 import { GlassCard } from '@/components/common/GlassCard';
 import { useAuthStore, type RoleName } from '@/store/authStore';
 import { departmentsApi } from '@/api';
@@ -57,46 +66,55 @@ export function FormField({
   value,
   form,
   onChange,
+  idPrefix = 'field',
 }: {
   field: FieldDef;
   value: string;
   form: Record<string, string>;
   onChange: (value: string) => void;
+  idPrefix?: string;
 }) {
+  const inputId = `${idPrefix}-${field.key}`;
+
   if (field.type === 'select') {
     const parentValue = field.dependsOn ? (form[field.dependsOn.field] ?? '') : '';
     const visibleOptions = field.dependsOn
       ? (field.options ?? []).filter((o) => {
           if (!parentValue) return true;
           if (!o.meta || !o.meta[field.dependsOn!.metaKey]) return true;
-          return String(o.meta[field.dependsOn!.metaKey]).trim().toLowerCase() === String(parentValue).trim().toLowerCase();
+          return (
+            String(o.meta[field.dependsOn!.metaKey]).trim().toLowerCase() ===
+            String(parentValue).trim().toLowerCase()
+          );
         })
       : (field.options ?? []);
 
     return (
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="flex h-10 w-full rounded-xl border border-border bg-white/60 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/40 dark:bg-slate-900/60 font-medium"
-      >
-        <option value="">Select {field.label}</option>
-        {visibleOptions.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+      <div className="space-y-1">
+        <Label htmlFor={inputId}>{field.label}</Label>
+        <Select id={inputId} value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">Select {field.label}</option>
+          {visibleOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+      </div>
     );
   }
 
   return (
-    <Input
-      type={field.type === 'number' ? 'number' : 'text'}
-      placeholder={field.label}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="rounded-xl"
-    />
+    <div className="space-y-1">
+      <Label htmlFor={inputId}>{field.label}</Label>
+      <Input
+        id={inputId}
+        type={field.type === 'number' ? 'number' : 'text'}
+        placeholder={field.label}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </div>
   );
 }
 
@@ -117,7 +135,12 @@ export function ResourcePage({
 }: {
   title: string;
   queryKey: string;
-  listFn: (search?: string, page?: number, limit?: number, departmentId?: string) => Promise<unknown[] | { data: unknown[]; total: number }>;
+  listFn: (
+    search?: string,
+    page?: number,
+    limit?: number,
+    departmentId?: string
+  ) => Promise<unknown[] | { data: unknown[]; total: number }>;
   columns: { key: string; label: string; render?: (row: Record<string, unknown>) => React.ReactNode }[];
   createFields?: FieldDef[];
   createFn?: (data: Record<string, any>) => Promise<unknown>;
@@ -162,7 +185,10 @@ export function ResourcePage({
     enabled: !hideDepartmentFilter,
     queryFn: async () => {
       try {
-        const res = await departmentsApi.list({ limit: 100, ...(instituteId ? { instituteId } : {}) });
+        const res = await departmentsApi.list({
+          limit: 100,
+          ...(instituteId ? { instituteId } : {}),
+        });
         const raw = (res as any)?.data?.data ?? (res as any)?.data ?? [];
         return raw as { id: string; code: string; name: string }[];
       } catch {
@@ -193,10 +219,10 @@ export function ResourcePage({
         const rawData = Array.isArray((res as any).data)
           ? (res as any).data
           : Array.isArray((res as any).items)
-          ? (res as any).items
-          : Array.isArray(res)
-          ? res
-          : [];
+            ? (res as any).items
+            : Array.isArray(res)
+              ? res
+              : [];
 
         const total =
           (res as any).meta?.pagination?.total ??
@@ -232,10 +258,18 @@ export function ResourcePage({
       let valB = b[key];
 
       if (valA && typeof valA === 'object') {
-        valA = (valA as any).code || (valA as any).name || (valA as any).firstName || JSON.stringify(valA);
+        valA =
+          (valA as any).code ||
+          (valA as any).name ||
+          (valA as any).firstName ||
+          JSON.stringify(valA);
       }
       if (valB && typeof valB === 'object') {
-        valB = (valB as any).code || (valB as any).name || (valB as any).firstName || JSON.stringify(valB);
+        valB =
+          (valB as any).code ||
+          (valB as any).name ||
+          (valB as any).firstName ||
+          JSON.stringify(valB);
       }
 
       const strA = String(valA ?? '').toLowerCase();
@@ -272,7 +306,10 @@ export function ResourcePage({
       qc.invalidateQueries({ queryKey: [queryKey] });
     },
     onError: (e: unknown) =>
-      toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Failed to create'),
+      toast.error(
+        (e as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+          'Failed to create'
+      ),
   });
 
   const update = useMutation({
@@ -284,7 +321,10 @@ export function ResourcePage({
       qc.invalidateQueries({ queryKey: [queryKey] });
     },
     onError: (e: unknown) =>
-      toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Failed to update'),
+      toast.error(
+        (e as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+          'Failed to update'
+      ),
   });
 
   const remove = useMutation({
@@ -294,7 +334,10 @@ export function ResourcePage({
       qc.invalidateQueries({ queryKey: [queryKey] });
     },
     onError: (e: unknown) =>
-      toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Failed to delete'),
+      toast.error(
+        (e as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+          'Failed to delete'
+      ),
   });
 
   const startEdit = (row: Record<string, unknown>) => {
@@ -322,41 +365,50 @@ export function ResourcePage({
   }, [currentPage, totalPages]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 max-w-7xl mx-auto">
       {/* Header Bar */}
-      <GlassCard className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <section className="surface-card rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="font-display text-2xl font-extrabold tracking-tight text-foreground">{title}</h2>
-          <p className="text-sm text-muted font-medium">Manage and configure {title.toLowerCase()}</p>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-foreground">
+            {title}
+          </h1>
+          <p className="text-sm text-muted mt-0.5">
+            Manage and configure {title.toLowerCase()}.
+          </p>
         </div>
 
         {createFields && createFn && (
           <Button
-            variant="default"
-            className="rounded-xl gap-2 font-bold shadow-md shadow-primary/20 bg-gradient-to-r from-primary to-primary-light"
+            variant={showAddForm ? 'outline' : 'default'}
+            className="gap-2 shrink-0"
             onClick={() => setShowAddForm((s) => !s)}
           >
-            {showAddForm ? <X size={16} /> : <Plus size={16} />}
+            {showAddForm ? <X size={16} aria-hidden="true" /> : <Plus size={16} aria-hidden="true" />}
             {showAddForm ? 'Close Form' : `Add ${title.slice(0, -1)}`}
           </Button>
         )}
-      </GlassCard>
+      </section>
 
       {/* Expandable Creation Form */}
       <AnimatePresence>
         {showAddForm && createFields && createFn && (
           <motion.div
-            initial={{ opacity: 0, height: 0, y: -10 }}
-            animate={{ opacity: 1, height: 'auto', y: 0 }}
-            exit={{ opacity: 0, height: 0, y: -10 }}
-            transition={{ duration: 0.3 }}
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.2 }}
           >
-            <GlassCard title={`New ${title.slice(0, -1)}`} subtitle="Enter details below" headerIcon={<Plus size={18} />}>
-              <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4 pt-2">
+            <GlassCard
+              title={`New ${title.slice(0, -1)}`}
+              subtitle="Fill in the details below and save"
+              headerIcon={<Plus size={17} aria-hidden="true" />}
+            >
+              <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4 items-end">
                 {createFields.map((f) => (
                   <FormField
                     key={f.key}
                     field={f}
+                    idPrefix="create"
                     value={form[f.key] ?? ''}
                     form={form}
                     onChange={(v) => {
@@ -372,12 +424,12 @@ export function ResourcePage({
                     }}
                   />
                 ))}
-                <div className="col-span-full md:col-span-1 flex gap-2 items-center mt-1">
+                <div className="col-span-full md:col-span-1">
                   <Button
                     onClick={() => create.mutate()}
                     disabled={create.isPending}
                     loading={create.isPending}
-                    className="w-full rounded-xl font-bold"
+                    className="w-full"
                   >
                     Save Record
                   </Button>
@@ -389,23 +441,29 @@ export function ResourcePage({
       </AnimatePresence>
 
       {/* Filter & Search Toolbar */}
-      <GlassCard className="p-4 flex flex-wrap gap-3 items-center justify-between">
-        <div className="flex flex-wrap gap-3 items-center flex-1 max-w-3xl">
+      <section className="surface-card rounded-2xl p-4 flex flex-wrap gap-3 items-center justify-between">
+        <div className="flex flex-wrap gap-3 items-center flex-1">
           <div className="relative flex-1 min-w-[200px] max-w-xs">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <Search
+              size={15}
+              aria-hidden="true"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+            />
             <Input
+              aria-label={`Search ${title.toLowerCase()}`}
               placeholder={`Search ${title.toLowerCase()}…`}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 rounded-xl"
+              className="pl-9"
             />
           </div>
 
           {!hideDepartmentFilter && (
-            <select
+            <Select
+              aria-label="Filter by department"
               value={selectedDeptId}
               onChange={(e) => setSelectedDeptId(e.target.value)}
-              className="flex h-10 w-full max-w-xs rounded-xl border border-border bg-white/60 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/40 dark:bg-slate-900/60 font-medium"
+              className="w-full sm:w-auto sm:min-w-52 max-w-xs"
             >
               <option value="">All Departments</option>
               {departmentOptions.map((d) => (
@@ -413,15 +471,16 @@ export function ResourcePage({
                   {d.label}
                 </option>
               ))}
-            </select>
+            </Select>
           )}
 
           {filters?.map((f) => (
-            <select
+            <Select
               key={f.key}
+              aria-label={`Filter by ${f.label}`}
               value={f.value}
               onChange={(e) => f.onChange(e.target.value)}
-              className="flex h-10 w-full max-w-xs rounded-xl border border-border bg-white/60 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/40 dark:bg-slate-900/60 font-medium"
+              className="w-full sm:w-auto sm:min-w-44 max-w-xs"
             >
               <option value="">All {f.label}s</option>
               {f.options.map((o) => (
@@ -429,22 +488,22 @@ export function ResourcePage({
                   {o.label}
                 </option>
               ))}
-            </select>
+            </Select>
           ))}
         </div>
-      </GlassCard>
+      </section>
 
-      {/* Enterprise Data Table Glass Container */}
-      <GlassCard className="p-0 overflow-hidden border border-white/20 dark:border-white/10 shadow-xl">
+      {/* Enterprise Data Table */}
+      <section className="surface-card rounded-2xl overflow-hidden">
         {isLoading ? (
-          <Skeleton className="m-4 h-48 rounded-xl" />
+          <Skeleton className="m-5 h-48 rounded-xl" />
         ) : isError ? (
           <div className="p-8 text-center">
             <p className="text-sm text-danger font-medium">
-              {(error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
-                'Failed to load data'}
+              {(error as { response?: { data?: { message?: string } } })?.response?.data
+                ?.message ?? 'Failed to load data'}
             </p>
-            <Button variant="outline" className="mt-4 rounded-xl" onClick={() => refetch()}>
+            <Button variant="outline" className="mt-4" onClick={() => refetch()}>
               Retry Loading
             </Button>
           </div>
@@ -452,13 +511,14 @@ export function ResourcePage({
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border text-left bg-slate-100/60 dark:bg-slate-900/60 select-none">
+                <tr className="border-b border-border text-left bg-surface-subtle select-none">
                   {columns.map((c) => {
                     const isCurrent = (sortField || columns[0]?.key) === c.key;
                     return (
                       <th
+                        scope="col"
                         key={c.key}
-                        className="p-3.5 font-bold text-xs uppercase tracking-wider text-muted cursor-pointer hover:bg-slate-200/50 dark:hover:bg-slate-800/50 transition-colors"
+                        className="px-4 py-3 font-semibold text-xs uppercase tracking-wider text-muted cursor-pointer hover:text-foreground transition-colors"
                         onClick={() => handleSort(c.key)}
                         title={`Sort by ${c.label}`}
                       >
@@ -466,24 +526,40 @@ export function ResourcePage({
                           <span>{c.label}</span>
                           {isCurrent ? (
                             sortDir === 'asc' ? (
-                              <ChevronUp className="h-4 w-4 text-primary dark:text-cyan-accent" />
+                              <ChevronUp
+                                className="h-4 w-4 text-primary dark:text-cyan-accent"
+                                aria-hidden="true"
+                              />
                             ) : (
-                              <ChevronDown className="h-4 w-4 text-primary dark:text-cyan-accent" />
+                              <ChevronDown
+                                className="h-4 w-4 text-primary dark:text-cyan-accent"
+                                aria-hidden="true"
+                              />
                             )
                           ) : (
-                            <ArrowUpDown className="h-3.5 w-3.5 opacity-30 hover:opacity-70" />
+                            <ArrowUpDown className="h-3.5 w-3.5 opacity-35" aria-hidden="true" />
                           )}
                         </div>
                       </th>
                     );
                   })}
-                  {canEdit && <th className="p-3.5 font-bold text-xs uppercase tracking-wider text-muted">Actions</th>}
+                  {canEdit && (
+                    <th
+                      scope="col"
+                      className="px-4 py-3 font-semibold text-xs uppercase tracking-wider text-muted"
+                    >
+                      Actions
+                    </th>
+                  )}
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-border">
                 {displayData.length === 0 ? (
                   <tr>
-                    <td colSpan={columns.length + (canEdit ? 1 : 0)} className="p-10 text-center text-muted">
+                    <td
+                      colSpan={columns.length + (canEdit ? 1 : 0)}
+                      className="p-10 text-center text-muted"
+                    >
                       {emptyMessage ?? 'No records found matching criteria'}
                     </td>
                   </tr>
@@ -495,23 +571,22 @@ export function ResourcePage({
                       <React.Fragment key={rowId}>
                         <tr
                           className={cn(
-                            'border-b border-border/40 transition-colors hover:bg-primary/5 dark:hover:bg-cyan-accent/5 font-medium',
-                            isEditingThisRow && 'bg-primary/10 dark:bg-cyan-accent/10'
+                            'transition-colors hover:bg-surface-subtle/60',
+                            isEditingThisRow && 'bg-primary/5 dark:bg-blue-500/10'
                           )}
                         >
                           {columns.map((c) => (
-                            <td key={c.key} className="p-3.5 text-foreground">
+                            <td key={c.key} className="px-4 py-3 text-foreground">
                               {c.render
                                 ? c.render(row as Record<string, unknown>)
                                 : String((row as Record<string, unknown>)[c.key] ?? '—')}
                             </td>
                           ))}
                           {canEdit && (
-                            <td className="p-3.5 flex gap-2 items-center">
+                            <td className="px-4 py-3 flex gap-2 items-center">
                               <Button
                                 size="sm"
                                 variant={isEditingThisRow ? 'default' : 'outline'}
-                                className="rounded-lg h-8 px-2.5 text-xs font-semibold"
                                 onClick={() => {
                                   if (isEditingThisRow) {
                                     cancelEdit();
@@ -521,14 +596,14 @@ export function ResourcePage({
                                 }}
                                 disabled={update.isPending}
                               >
-                                <Pencil className="h-3.5 w-3.5" />
+                                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
                                 {isEditingThisRow ? 'Cancel' : 'Edit'}
                               </Button>
                               {removeFn && (
                                 <Button
                                   size="sm"
                                   variant="danger"
-                                  className="rounded-lg h-8 px-2.5 text-xs font-semibold"
+                                  aria-label="Delete record"
                                   onClick={() => {
                                     if (!rowId) return;
                                     if (!confirm('Delete this record?')) return;
@@ -536,7 +611,7 @@ export function ResourcePage({
                                   }}
                                   disabled={remove.isPending}
                                 >
-                                  <Trash2 className="h-3.5 w-3.5" />
+                                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                                 </Button>
                               )}
                             </td>
@@ -545,37 +620,48 @@ export function ResourcePage({
 
                         {/* Inline Card Editor */}
                         {isEditingThisRow && (
-                          <tr className="bg-primary/5 dark:bg-slate-900/80 border-b border-primary/30">
+                          <tr className="bg-surface-subtle/40">
                             <td colSpan={columns.length + (canEdit ? 1 : 0)} className="p-4">
-                              <GlassCard className="space-y-4 border-primary/40 shadow-xl bg-white/90 dark:bg-slate-900/90">
-                                <div className="flex items-center justify-between border-b border-border/40 pb-2">
+                              <div className="surface-card rounded-xl p-4 space-y-4 border-primary/30">
+                                <div className="flex items-center justify-between border-b border-border pb-2.5">
                                   <p className="text-sm font-bold text-primary dark:text-cyan-accent">
-                                    Editing record: {String((row as any).name || (row as any).code || 'Item')}
+                                    Editing:{' '}
+                                    {String((row as any).name || (row as any).code || 'Record')}
                                   </p>
-                                  <Button variant="ghost" size="sm" onClick={cancelEdit}>
-                                    ✕ Close
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={cancelEdit}
+                                    aria-label="Close editor"
+                                  >
+                                    <X size={14} aria-hidden="true" /> Close
                                   </Button>
                                 </div>
-                                <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-4">
+                                <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-4 items-end">
                                   {editFields!.map((f) => (
                                     <FormField
                                       key={f.key}
                                       field={f}
+                                      idPrefix={`edit-${rowId}`}
                                       value={editForm[f.key] ?? ''}
                                       form={editForm}
                                       onChange={(v) => setEditForm((s) => ({ ...s, [f.key]: v }))}
                                     />
                                   ))}
-                                  <div className="flex gap-2 items-center col-span-full md:col-span-1 pt-1">
-                                    <Button onClick={() => update.mutate()} disabled={update.isPending} loading={update.isPending} className="rounded-xl font-bold">
+                                  <div className="flex gap-2 items-center col-span-full md:col-span-1">
+                                    <Button
+                                      onClick={() => update.mutate()}
+                                      disabled={update.isPending}
+                                      loading={update.isPending}
+                                    >
                                       Save Changes
                                     </Button>
-                                    <Button variant="outline" onClick={cancelEdit} className="rounded-xl">
+                                    <Button variant="outline" onClick={cancelEdit}>
                                       Cancel
                                     </Button>
                                   </div>
                                 </div>
-                              </GlassCard>
+                              </div>
                             </td>
                           </tr>
                         )}
@@ -589,26 +675,30 @@ export function ResourcePage({
         )}
 
         {total > 0 && (
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-5 py-4 bg-slate-100/50 dark:bg-slate-900/40 border-t border-border/40 text-sm">
-            <div className="text-muted font-medium text-xs">
-              Showing <span className="font-bold text-foreground">{total === 0 ? 0 : (currentPage - 1) * limit + 1}</span> to{' '}
-              <span className="font-bold text-foreground">{Math.min(currentPage * limit, total)}</span> of{' '}
-              <span className="font-bold text-foreground">{total}</span> records
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3.5 bg-surface-subtle/60 border-t border-border text-sm">
+            <div className="text-muted font-medium text-xs tabular-nums">
+              Showing{' '}
+              <span className="font-semibold text-foreground">
+                {total === 0 ? 0 : (currentPage - 1) * limit + 1}
+              </span>{' '}
+              to{' '}
+              <span className="font-semibold text-foreground">
+                {Math.min(currentPage * limit, total)}
+              </span>{' '}
+              of <span className="font-semibold text-foreground">{total}</span> records
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
               <Button
                 variant="outline"
                 size="sm"
-                className="rounded-lg h-8 text-xs font-semibold"
                 onClick={() => setPage(1)}
                 disabled={currentPage === 1}
               >
-                « First
+                First
               </Button>
               <Button
                 variant="outline"
                 size="sm"
-                className="rounded-lg h-8 text-xs font-semibold"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={currentPage === 1}
               >
@@ -621,7 +711,7 @@ export function ResourcePage({
                     key={pageNum}
                     variant={currentPage === pageNum ? 'default' : 'outline'}
                     size="sm"
-                    className="h-8 w-8 p-0 rounded-lg text-xs font-bold"
+                    className="h-8.5 w-8.5 p-0 tabular-nums"
                     onClick={() => setPage(pageNum)}
                   >
                     {pageNum}
@@ -632,7 +722,6 @@ export function ResourcePage({
               <Button
                 variant="outline"
                 size="sm"
-                className="rounded-lg h-8 text-xs font-semibold"
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={currentPage >= totalPages}
               >
@@ -641,31 +730,31 @@ export function ResourcePage({
               <Button
                 variant="outline"
                 size="sm"
-                className="rounded-lg h-8 text-xs font-semibold"
                 onClick={() => setPage(totalPages)}
                 disabled={currentPage >= totalPages}
               >
-                Last »
+                Last
               </Button>
 
-              <select
+              <Select
+                aria-label="Records per page"
                 value={limit}
                 onChange={(e) => {
                   setLimit(Number(e.target.value));
                   setPage(1);
                 }}
-                className="h-8 rounded-lg border border-border bg-white/60 px-2 text-xs font-semibold outline-none focus:ring-2 focus:ring-primary/40 dark:bg-slate-900/60 ml-2"
+                className="h-8.5 w-auto ml-1 text-xs"
               >
                 {[10, 25, 50, 100].map((size) => (
                   <option key={size} value={size}>
                     {size} / page
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
         )}
-      </GlassCard>
+      </section>
     </div>
   );
 }

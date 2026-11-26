@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { X } from 'lucide-react';
 import { coursesApi, departmentsApi, institutesApi } from '@/api';
 import { ResourcePage, useInstituteScope } from '../ResourcePage';
-import { Button, Card, Skeleton } from '@/components/ui';
+import { Button, Skeleton } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import { toast } from 'sonner';
 
@@ -241,43 +242,55 @@ export function CoursesPage() {
 
       {/* Subject Assignment Modal */}
       {selectedCourse && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <Card className="w-full max-w-2xl max-h-[85vh] flex flex-col p-6 space-y-4 overflow-hidden bg-white dark:bg-slate-900 shadow-2xl rounded-2xl border border-border">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4"
+          onClick={() => setSelectedCourse(null)}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="course-assign-title"
+            onClick={(e) => e.stopPropagation()}
+            className="surface-card w-full max-w-2xl max-h-[85vh] flex flex-col p-6 space-y-4 overflow-hidden shadow-2xl rounded-2xl"
+          >
             {/* Header */}
-            <div className="flex justify-between items-start border-b border-border pb-3">
+            <div className="flex justify-between items-start gap-3 border-b border-border pb-3">
               <div>
-                <h3 className="text-xl font-bold font-display text-foreground">
+                <h2 id="course-assign-title" className="text-lg font-bold font-display text-foreground">
                   Assign Subjects
-                </h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {selectedCourse.code} — {selectedCourse.name} &nbsp;·&nbsp; Semester {selectedCourse.semesterNo}
+                </h2>
+                <p className="text-xs text-muted mt-0.5">
+                  {selectedCourse.code} — {selectedCourse.name} · Semester {selectedCourse.semesterNo}
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  Dept: {selectedCourse.department?.code ?? '—'} &nbsp;·&nbsp; Only showing subjects from this department
+                <p className="text-xs text-muted">
+                  Dept: {selectedCourse.department?.code ?? '—'} · Showing subjects from this department
                 </p>
               </div>
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-lg"
                 onClick={() => setSelectedCourse(null)}
-                className="text-muted-foreground hover:text-foreground text-lg font-semibold ml-4"
+                aria-label="Close subject assignment modal"
               >
-                ✕
-              </button>
+                <X size={16} aria-hidden="true" />
+              </Button>
             </div>
 
             {/* Live Credit Counter */}
             <div className={cn(
               'flex items-center gap-3 rounded-xl px-4 py-2.5 border text-sm font-medium transition-colors',
               totalCredits > 0
-                ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400'
-                : 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400'
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300'
+                : 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300'
             )}>
-              <span className="text-2xl font-bold">{totalCredits}</span>
+              <span className="font-display text-2xl font-bold tabular-nums">{totalCredits}</span>
               <div>
                 <div>Total Credits (auto-calculated)</div>
-                <div className="text-xs font-normal opacity-75">
+                <div className="text-xs font-normal opacity-80">
                   {selectedSubjectIds.length} subject{selectedSubjectIds.length !== 1 ? 's' : ''} selected
                   {selectedCourse.totalCredits > 0 && totalCredits !== selectedCourse.totalCredits && (
-                    <span className="ml-2 text-amber-600 dark:text-amber-400">
+                    <span className="ml-2 font-medium">
                       (was {selectedCourse.totalCredits} cr)
                     </span>
                   )}
@@ -294,7 +307,7 @@ export function CoursesPage() {
               ) : (
                 <div className="grid gap-2">
                   {(availableSubjects ?? []).length === 0 ? (
-                    <p className="text-center text-sm text-muted-foreground py-8">
+                    <p className="text-center text-sm text-muted py-8">
                       No subjects found for this department. Create subjects first.
                     </p>
                   ) : (
@@ -304,33 +317,35 @@ export function CoursesPage() {
                         <label
                           key={s.id}
                           className={cn(
-                            'flex items-center gap-3 p-3 rounded-xl border border-border cursor-pointer transition-all hover:bg-slate-50 dark:hover:bg-slate-800/50',
-                            isChecked && 'border-primary/50 bg-primary/5 dark:bg-primary/10'
+                            'flex items-center gap-3 p-3 rounded-xl border border-border cursor-pointer transition-colors hover:bg-surface-subtle/60',
+                            isChecked && 'border-primary/50 bg-primary/5 dark:bg-blue-500/10'
                           )}
                         >
                           <input
                             type="checkbox"
                             checked={isChecked}
                             onChange={() => toggleSubject(s.id)}
-                            className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                            className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
                           />
                           <div className="flex-1 min-w-0">
-                            <div className="font-semibold text-sm truncate">
+                            <div className="font-semibold text-sm text-foreground truncate">
                               {s.code} — {s.name}
                             </div>
-                            <div className="text-xs text-muted-foreground flex gap-3 mt-0.5">
+                            <div className="text-xs text-muted flex gap-3 mt-0.5">
                               <span className={cn(
-                                'px-1.5 py-0.5 rounded font-medium text-[10px]',
-                                s.type === 'LAB' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                                'px-1.5 py-0.5 rounded font-semibold text-[10px]',
+                                s.type === 'LAB'
+                                  ? 'bg-amber-500/15 text-amber-800 dark:text-amber-300'
+                                  : 'bg-blue-500/12 text-blue-700 dark:text-blue-300'
                               )}>
                                 {s.type}
                               </span>
-                              <span>{s.weeklyHours} hrs/week</span>
+                              <span className="tabular-nums">{s.weeklyHours} hrs/week</span>
                             </div>
                           </div>
                           <div className={cn(
-                            'text-right shrink-0',
-                            isChecked ? 'text-primary font-bold' : 'text-muted-foreground'
+                            'text-right shrink-0 tabular-nums',
+                            isChecked ? 'text-primary dark:text-cyan-accent font-bold' : 'text-muted'
                           )}>
                             <div className="text-sm font-semibold">{s.credits} cr</div>
                           </div>
@@ -344,8 +359,8 @@ export function CoursesPage() {
 
             {/* Footer */}
             <div className="flex justify-between items-center gap-2 border-t border-border pt-4">
-              <div className="text-xs text-muted-foreground">
-                Credits will be auto-saved as <strong>{totalCredits}</strong>
+              <div className="text-xs text-muted tabular-nums">
+                Credits will be auto-saved as <strong className="text-foreground">{totalCredits}</strong>
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={() => setSelectedCourse(null)}>
@@ -359,12 +374,13 @@ export function CoursesPage() {
                     })
                   }
                   disabled={updateSubjectsMutation.isPending}
+                  loading={updateSubjectsMutation.isPending}
                 >
                   {updateSubjectsMutation.isPending ? 'Saving…' : `Save (${totalCredits} cr)`}
                 </Button>
               </div>
             </div>
-          </Card>
+          </section>
         </div>
       )}
     </div>

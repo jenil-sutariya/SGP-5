@@ -2,11 +2,9 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
 import {
   Cpu,
   Sparkles,
-  CheckCircle2,
   AlertTriangle,
   ArrowRight,
   ShieldCheck,
@@ -22,7 +20,7 @@ import {
   schedulerApi,
   timetableApi,
 } from '@/api';
-import { Button, Input, Label, Badge } from '@/components/ui';
+import { Button, Input, Label, Badge, Select } from '@/components/ui';
 import { GlassCard } from '@/components/common/GlassCard';
 import { InstituteBadge } from '@/components/common/InstituteBadge';
 import { useAuthStore } from '@/store/authStore';
@@ -39,6 +37,7 @@ export default function SchedulerPage() {
   const [selectedInstituteId, setSelectedInstituteId] = useState('');
   const isAdmin = user?.role?.name === 'ADMIN';
   const instituteId = isAdmin ? selectedInstituteId || undefined : (user?.instituteId ?? undefined);
+
   const { data: institutes } = useQuery({
     queryKey: ['scheduler-institutes'],
     enabled: isAdmin,
@@ -208,9 +207,6 @@ export default function SchedulerPage() {
     generate.mutate();
   };
 
-  const selectClass =
-    'h-11 w-full rounded-xl border border-border bg-white/60 px-3 text-sm font-semibold dark:bg-slate-900/60 focus:outline-none focus:ring-2 focus:ring-primary/40';
-
   const scopeLabel = sectionId
     ? `section ${(sections ?? []).find((s) => s.id === sectionId)?.name ?? ''}`
     : deptId
@@ -218,117 +214,115 @@ export default function SchedulerPage() {
       : 'all sections';
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-7xl mx-auto">
       {/* Header Banner */}
-      <GlassCard className="p-6 md:p-8 bg-gradient-to-r from-primary/15 via-primary-light/10 to-amber-500/10 border-primary/20">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2 max-w-2xl">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-primary text-white shadow-md">
-                <Cpu size={22} />
-              </div>
-              <InstituteBadge code={user?.institute?.code || 'CHARUSAT'} size="md" />
+      <section className="surface-card rounded-2xl p-6 sm:p-7 flex flex-col md:flex-row md:items-center justify-between gap-5">
+        <div className="space-y-2 max-w-2xl">
+          <div className="flex items-center gap-2.5">
+            <div className="h-10 w-10 rounded-xl bg-primary text-white flex items-center justify-center shrink-0">
+              <Cpu size={20} aria-hidden="true" />
             </div>
-            <h1 className="font-display font-extrabold text-2xl md:text-3xl text-foreground tracking-tight">
-              AI Timetable Scheduler Engine
-            </h1>
-            <p className="text-sm text-muted">
-              Generate missing sessions using free rooms, labs and faculty. Existing generated and
-              published timetables keep their bookings.
-            </p>
+            <InstituteBadge code={user?.institute?.code || 'CHARUSAT'} size="md" />
           </div>
+          <h1 className="font-display font-bold text-2xl sm:text-3xl text-foreground tracking-tight">
+            AI Timetable Scheduler
+          </h1>
+          <p className="text-sm text-muted leading-relaxed">
+            Automatically assign lectures and multi-slot labs across available classrooms,
+            laboratories, and professors while preserving existing generated and published bookings.
+          </p>
         </div>
-      </GlassCard>
+      </section>
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Form Panel */}
         <GlassCard
           title="Configure Scheduler"
-          subtitle="Set scope and parameters"
-          headerIcon={<Zap size={18} />}
+          subtitle="Set academic period, scope, and optimization"
+          headerIcon={<Zap size={18} aria-hidden="true" />}
         >
-          <form className="space-y-4 pt-1" onSubmit={handleSubmit}>
-            <div className="space-y-1.5">
-              <Label htmlFor="tt-name" className="font-semibold text-xs text-foreground">
-                Timetable Title (optional)
-              </Label>
-              <Input
-                id="tt-name"
-                placeholder="e.g. CSE Odd Semester 2025-26"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="rounded-xl h-11"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="tt-year" className="font-semibold text-xs text-foreground">
-                  Academic Year
-                </Label>
-                <select
-                  id="tt-year"
-                  className={selectClass}
-                  value={yearId}
-                  onChange={(e) => setYearId(e.target.value)}
-                >
-                  <option value="">Select year…</option>
-                  {(years ?? []).map((y) => (
-                    <option key={y.id} value={y.id}>
-                      {y.name}
-                      {y.isCurrent ? ' ✓' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
+          <form className="space-y-5" onSubmit={handleSubmit}>
+            {/* Step 1: Title & Period */}
+            <div className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-primary dark:text-cyan-accent">
+                1. Title & Academic Period
+              </p>
 
               <div className="space-y-1.5">
-                <Label htmlFor="tt-sem" className="font-semibold text-xs text-foreground">
-                  Semester
-                </Label>
-                <select
-                  id="tt-sem"
-                  className={selectClass}
-                  value={semId}
-                  onChange={(e) => setSemId(e.target.value)}
-                >
-                  <option value="">Select semester…</option>
-                  {filteredSemesters.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                      {s.isCurrent ? ' ✓' : ''}
-                    </option>
-                  ))}
-                </select>
+                <Label htmlFor="tt-name">Timetable Title (optional)</Label>
+                <Input
+                  id="tt-name"
+                  placeholder="e.g. CSE Odd Semester 2025-26"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
               </div>
-            </div>
 
-            <div className="space-y-2 pt-1">
-              <Label className="font-semibold text-xs text-foreground">Scope Configuration</Label>
-              <div className="rounded-2xl border border-border/50 bg-white/40 dark:bg-slate-900/40 p-4 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  {isAdmin && (
-                    <div className="space-y-1.5 mb-3">
-                      <Label htmlFor="tt-institute">Institute</Label>
-                      <select
-                        id="tt-institute"
-                        className={selectClass}
-                        value={selectedInstituteId}
-                        onChange={(e) => setSelectedInstituteId(e.target.value)}
-                      >
-                        <option value="">Select institute</option>
-                        {(institutes ?? []).map((institute) => (
-                          <option key={institute.id} value={institute.id}>
-                            {institute.code} — {institute.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                  <p className="text-xs font-semibold text-muted">Department</p>
-                  <select
+                  <Label htmlFor="tt-year">Academic Year</Label>
+                  <Select
+                    id="tt-year"
+                    value={yearId}
+                    onChange={(e) => setYearId(e.target.value)}
+                  >
+                    <option value="">Select year…</option>
+                    {(years ?? []).map((y) => (
+                      <option key={y.id} value={y.id}>
+                        {y.name}
+                        {y.isCurrent ? ' (Current)' : ''}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="tt-sem">Semester</Label>
+                  <Select
+                    id="tt-sem"
+                    value={semId}
+                    onChange={(e) => setSemId(e.target.value)}
+                  >
+                    <option value="">Select semester…</option>
+                    {filteredSemesters.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                        {s.isCurrent ? ' (Current)' : ''}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            {/* Step 2: Scope */}
+            <div className="space-y-3 pt-2 border-t border-border">
+              <p className="text-xs font-semibold uppercase tracking-wider text-primary dark:text-cyan-accent">
+                2. Target Scope
+              </p>
+              <div className="rounded-xl border border-border bg-surface-subtle/60 p-4 space-y-3">
+                {isAdmin && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="tt-institute">Institute</Label>
+                    <Select
+                      id="tt-institute"
+                      value={selectedInstituteId}
+                      onChange={(e) => setSelectedInstituteId(e.target.value)}
+                    >
+                      <option value="">Select institute</option>
+                      {(institutes ?? []).map((institute) => (
+                        <option key={institute.id} value={institute.id}>
+                          {institute.code} — {institute.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="tt-dept">Department</Label>
+                  <Select
                     id="tt-dept"
-                    className={selectClass}
                     value={deptId}
                     onChange={(e) => setDeptId(e.target.value)}
                   >
@@ -338,21 +332,20 @@ export default function SchedulerPage() {
                         {d.code} — {d.name}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
 
                 <div className="space-y-1.5">
-                  <p className="text-xs font-semibold text-muted">
+                  <Label htmlFor="tt-section">
                     Division / Section
                     {!deptId && (
-                      <span className="ml-1 opacity-60 font-normal">
-                        (select department to filter)
+                      <span className="ml-1.5 text-muted font-normal">
+                        (select department to narrow)
                       </span>
                     )}
-                  </p>
-                  <select
+                  </Label>
+                  <Select
                     id="tt-section"
-                    className={selectClass}
                     value={sectionId}
                     onChange={(e) => setSectionId(e.target.value)}
                   >
@@ -364,23 +357,40 @@ export default function SchedulerPage() {
                           {s.name}
                         </option>
                       ))}
-                  </select>
+                  </Select>
                 </div>
               </div>
             </div>
 
-            <label className="flex items-center gap-2.5 text-sm font-semibold cursor-pointer pt-1 text-foreground">
-              <input
-                type="checkbox"
-                checked={useGenetic}
-                onChange={(e) => setUseGenetic(e.target.checked)}
-                className="w-4 h-4 rounded text-primary focus:ring-primary"
-              />
-              <span>Enable Genetic Algorithm Optimization Polish</span>
-            </label>
+            {/* Step 3: Engine */}
+            <div className="space-y-2 pt-2 border-t border-border">
+              <p className="text-xs font-semibold uppercase tracking-wider text-primary dark:text-cyan-accent">
+                3. Optimization Engine
+              </p>
+              <label className="flex items-start gap-3 rounded-xl border border-border p-3 cursor-pointer hover:bg-surface-subtle/60 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={useGenetic}
+                  onChange={(e) => setUseGenetic(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded text-primary focus:ring-primary"
+                />
+                <div className="text-sm">
+                  <span className="font-semibold text-foreground block">
+                    Enable Genetic Algorithm Optimization Polish
+                  </span>
+                  <span className="text-xs text-muted">
+                    Improves distribution of lectures, faculty breaks, and lab placements after CSP
+                    assignment.
+                  </span>
+                </div>
+              </label>
+            </div>
 
             {submitErr && (
-              <p className="rounded-xl bg-rose-500/10 border border-rose-500/20 px-3.5 py-2.5 text-xs font-semibold text-rose-600 dark:text-rose-400">
+              <p
+                role="alert"
+                className="rounded-xl bg-red-500/10 border border-red-500/25 px-3.5 py-2.5 text-xs font-semibold text-danger"
+              >
                 {submitErr}
               </p>
             )}
@@ -388,10 +398,12 @@ export default function SchedulerPage() {
             <Button
               id="generate-timetable-button"
               type="submit"
+              size="lg"
               disabled={isScheduling}
-              className="w-full h-12 rounded-xl font-extrabold text-sm bg-gradient-to-r from-primary to-primary-light text-white shadow-lg shadow-primary/30 hover:opacity-95 gap-2"
+              loading={generate.isPending}
+              className="w-full font-bold"
             >
-              <Sparkles size={18} />
+              {!generate.isPending && <Sparkles size={17} aria-hidden="true" />}
               {generate.isPending
                 ? 'Scheduling available periods…'
                 : `Generate missing sessions — ${scopeLabel}`}
@@ -401,47 +413,45 @@ export default function SchedulerPage() {
 
         {/* Results Panel */}
         <GlassCard
-          title="Generation results"
-          subtitle="Saved sessions and any remaining scheduling needs"
-          headerIcon={<Layers size={18} />}
+          title="Generation Results"
+          subtitle="Saved sessions, quality score, and conflicts"
+          headerIcon={<Layers size={18} aria-hidden="true" />}
         >
           {status ? (
-            <div className="space-y-4 pt-1">
+            <div className="space-y-4">
               <div className="flex flex-wrap gap-2">
-                <Badge
-                  variant={status.status === 'PUBLISHED' ? 'success' : 'default'}
-                  className="font-bold"
-                >
+                <Badge variant={status.status === 'PUBLISHED' ? 'success' : 'default'}>
                   {status.status}
                 </Badge>
-                <Badge variant="secondary" className="font-mono font-bold">
+                <Badge variant="secondary" className="font-mono tabular-nums">
                   Entries: {status._count?.entries ?? 0}
                 </Badge>
                 <Badge
                   variant={status._count?.conflicts > 0 ? 'warning' : 'success'}
-                  className="font-mono font-bold"
+                  className="font-mono tabular-nums"
                 >
                   Conflicts: {status._count?.conflicts ?? 0}
                 </Badge>
                 {status.score != null && (
-                  <Badge variant="success" className="font-mono font-bold">
+                  <Badge variant="success" className="font-mono tabular-nums">
                     Score: {status.score}
                   </Badge>
                 )}
               </div>
 
-              <p className="text-xs text-muted">
+              <p className="text-xs text-muted leading-relaxed">
                 {status.metadata?.preservedSessions ?? 0} previously scheduled sessions preserved in
-                this scope. Rooms, labs and faculty booked by other departments remain unavailable
+                this scope. Rooms, labs, and faculty booked by other departments remain unavailable
                 during their booked periods.
               </p>
+
               {(status.metadata?.unassigned?.length ?? 0) > 0 && (
-                <div className="rounded-2xl border border-amber-300/60 bg-amber-500/10 p-3.5 text-xs text-amber-900 dark:text-amber-300">
-                  <strong className="flex items-center gap-1.5 font-bold mb-1">
-                    <AlertTriangle size={15} /> {status.metadata.unassigned.length} unscheduled
-                    sessions
+                <div className="rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50/80 dark:bg-amber-950/40 p-3.5 text-xs text-amber-950 dark:text-amber-200">
+                  <strong className="flex items-center gap-1.5 font-bold mb-1.5">
+                    <AlertTriangle size={14} aria-hidden="true" />
+                    {status.metadata.unassigned.length} unscheduled sessions
                   </strong>
-                  <div className="max-h-24 overflow-y-auto space-y-1 font-mono">
+                  <div className="max-h-28 overflow-y-auto space-y-1 font-mono">
                     {status.metadata.unassigned.map(
                       (u: { subjectCode: string; isLab: boolean }, i: number) => (
                         <div key={i} className="flex justify-between">
@@ -454,24 +464,22 @@ export default function SchedulerPage() {
                 </div>
               )}
 
-              <div className="flex flex-wrap gap-2.5 pt-2">
+              <div className="flex flex-wrap gap-2 pt-2">
                 <Button
                   id="schedule-remaining-button"
                   variant="outline"
                   size="sm"
-                  className="rounded-xl font-bold gap-1.5"
                   disabled={isScheduling}
                   onClick={() => {
                     if (qc.isMutating({ mutationKey: TIMETABLE_GENERATION_KEY })) return;
                     scheduleRemaining.mutate(resultId);
                   }}
                 >
-                  <RefreshCw size={14} /> Schedule remaining
+                  <RefreshCw size={14} aria-hidden="true" /> Schedule remaining
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="rounded-xl font-bold gap-1.5"
                   onClick={async () => {
                     try {
                       const res = await schedulerApi.resolveConflicts(resultId);
@@ -486,17 +494,13 @@ export default function SchedulerPage() {
                     }
                   }}
                 >
-                  <ShieldCheck size={14} /> Check conflicts
+                  <ShieldCheck size={14} aria-hidden="true" /> Check conflicts
                 </Button>
-                <Link to="/timetable">
-                  <Button
-                    variant="default"
-                    size="sm"
-                    className="rounded-xl font-bold gap-1.5 bg-gradient-to-r from-primary to-primary-light"
-                  >
-                    Open Timetable <ArrowRight size={14} />
-                  </Button>
-                </Link>
+                <Button asChild size="sm">
+                  <Link to="/timetable">
+                    Open Timetable <ArrowRight size={14} aria-hidden="true" />
+                  </Link>
+                </Button>
               </div>
 
               <div className="max-h-60 space-y-2 overflow-y-auto pt-2">
@@ -504,18 +508,15 @@ export default function SchedulerPage() {
                   (c: { id: string; type: string; severity: string; description: string }) => (
                     <div
                       key={c.id}
-                      className="rounded-xl border border-border/50 p-3 text-xs bg-white/40 dark:bg-slate-900/40"
+                      className="rounded-xl border border-border p-3 text-xs bg-surface-subtle/60"
                     >
                       <div className="mb-1 flex gap-2 items-center">
-                        <Badge
-                          variant={c.severity === 'CRITICAL' ? 'danger' : 'warning'}
-                          className="font-bold"
-                        >
+                        <Badge variant={c.severity === 'CRITICAL' ? 'danger' : 'warning'}>
                           {c.severity}
                         </Badge>
-                        <span className="font-bold text-foreground">{c.type}</span>
+                        <span className="font-semibold text-foreground">{c.type}</span>
                       </div>
-                      <p className="text-muted font-medium">{c.description}</p>
+                      <p className="text-muted">{c.description}</p>
                     </div>
                   )
                 )}
@@ -523,13 +524,15 @@ export default function SchedulerPage() {
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-16 text-center text-muted space-y-3">
-              <Cpu size={40} className="opacity-40 text-primary dark:text-cyan-accent" />
-              <p className="font-semibold text-sm">
-                Configure options and click Generate missing sessions
+              <div className="h-14 w-14 rounded-2xl bg-surface-subtle flex items-center justify-center text-primary dark:text-cyan-accent">
+                <Cpu size={28} aria-hidden="true" />
+              </div>
+              <p className="font-semibold text-sm text-foreground">
+                Ready to generate your schedule
               </p>
-              <p className="text-xs max-w-xs opacity-70">
-                You can generate for a single division or across all departments in{' '}
-                {user?.institute?.code || 'CHARUSAT'}.
+              <p className="text-xs max-w-xs leading-relaxed">
+                Configure your academic period and scope on the left, then click Generate missing
+                sessions for {user?.institute?.code || 'CHARUSAT'}.
               </p>
             </div>
           )}
