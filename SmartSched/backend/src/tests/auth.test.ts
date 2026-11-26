@@ -8,7 +8,7 @@ describe('Health', () => {
   it('returns API root metadata', async () => {
     const res = await request(app).get('/');
     expect(res.status).toBe(200);
-    expect(res.body.name).toBe('SmartSched API');
+    expect(res.body.name).toBe('CHARUSAT Timetable API');
   });
 
   it('returns health check', async () => {

@@ -1,4 +1,5 @@
 export interface SessionRequest {
+  venueRequirements?: import('./venue.rules').VenueRequirement[];
   id: string;
   courseOfferingId: string;
   subjectId: string;
@@ -39,12 +40,53 @@ export interface ScheduledAssignment {
   isLab: boolean;
 }
 
+export interface ExistingBooking {
+  dayId: string;
+  timeSlotId: string;
+  facultyId: string;
+  roomId?: string | null;
+  laboratoryId?: string | null;
+  sectionId?: string | null;
+  practicalBatchId?: string | null;
+}
+
 export interface EngineContext {
+  facultyTeachingDays?: Map<string, Set<string>>;
+  calendarExceptions?: import('../timetable/occurrence.rules').CalendarExceptions;
+  existingBookings?: ExistingBooking[];
+  existingFacultyLoad?: { facultyId: string; dayId: string; hours: number }[];
   requests: SessionRequest[];
   workingDays: { id: string; order: number; name: string }[];
-  timeSlots: { id: string; order: number; name: string; isLunchBreak: boolean; durationMins: number }[];
-  rooms: { id: string; capacity: number; departmentId: string | null; code: string }[];
-  laboratories: { id: string; capacity: number; departmentId: string; code: string }[];
+  timeSlots: {
+    id: string;
+    order: number;
+    name: string;
+    isLunchBreak: boolean;
+    durationMins: number;
+    startTime?: string;
+    endTime?: string;
+  }[];
+  rooms: {
+    roomTypeId?: string | null;
+    equipment?: string | null;
+    hasProjector?: boolean;
+    hasAC?: boolean;
+    hasWhiteboard?: boolean;
+    id: string;
+    capacity: number;
+    departmentId: string | null;
+    instituteId: string | null;
+    code: string;
+  }[];
+  laboratories: {
+    roomTypeId?: string | null;
+    equipment?: string | null;
+    id: string;
+    capacity: number;
+    departmentId: string;
+    instituteId: string | null;
+    code: string;
+  }[];
   facultyAvailability: Map<string, Set<string>>; // facultyId -> dayId|slotId available
   facultyPreferences: Map<string, { key: string; type: string; weight: number }[]>;
   facultyMaxPerDay: Map<string, number>;

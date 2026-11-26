@@ -1,19 +1,25 @@
 import { z } from 'zod';
 
-export const paginationSchema = z.object({
-  page: z.coerce.number().int().min(1).optional(),
-  limit: z.coerce.number().int().min(1).max(100).optional(),
-  search: z.string().optional(),
-  sortBy: z.string().optional(),
-  sortOrder: z.enum(['asc', 'desc']).optional(),
-}).passthrough();
+export const paginationSchema = z
+  .object({
+    page: z.coerce.number().int().min(1).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+    search: z.string().optional(),
+    sortBy: z.string().optional(),
+    sortOrder: z.enum(['asc', 'desc']).optional(),
+  })
+  .passthrough();
 
 export const idParamSchema = z.object({
   id: z.string().min(1),
 });
 
 export const departmentSchema = z.object({
-  code: z.string().min(2).max(20).transform((v) => v.toUpperCase()),
+  code: z
+    .string()
+    .min(2)
+    .max(20)
+    .transform((v) => v.toUpperCase()),
   name: z.string().min(2).max(200),
   description: z.string().optional(),
   instituteId: z.string().min(1),
@@ -54,7 +60,13 @@ export const studentSchema = z.object({
 });
 
 export const subjectSchema = z.object({
-  code: z.string().min(2).transform((v) => v.toUpperCase()),
+  requiredEquipment: z.string().max(2000).nullable().optional(),
+  requiredRoomTypeId: z.string().min(1).nullable().optional(),
+  minRoomCapacity: z.number().int().min(1).nullable().optional(),
+  code: z
+    .string()
+    .min(2)
+    .transform((v) => v.toUpperCase()),
   name: z.string().min(2),
   description: z.string().optional(),
   credits: z.number().int().min(0).optional(),
@@ -68,7 +80,10 @@ export const subjectSchema = z.object({
 });
 
 export const courseSchema = z.object({
-  code: z.string().min(2).transform((v) => v.toUpperCase()),
+  code: z
+    .string()
+    .min(2)
+    .transform((v) => v.toUpperCase()),
   name: z.string().min(2),
   description: z.string().optional(),
   departmentId: z.string().min(1),
@@ -80,7 +95,10 @@ export const courseSchema = z.object({
 });
 
 export const roomSchema = z.object({
-  code: z.string().min(2).transform((v) => v.toUpperCase()),
+  code: z
+    .string()
+    .min(2)
+    .transform((v) => v.toUpperCase()),
   name: z.string().min(2),
   buildingId: z.string().min(1),
   departmentId: z.string().optional().nullable(),
@@ -95,7 +113,10 @@ export const roomSchema = z.object({
 });
 
 export const labSchema = z.object({
-  code: z.string().min(2).transform((v) => v.toUpperCase()),
+  code: z
+    .string()
+    .min(2)
+    .transform((v) => v.toUpperCase()),
   name: z.string().min(2),
   buildingId: z.string().min(1),
   departmentId: z.string().min(1),
@@ -103,12 +124,16 @@ export const labSchema = z.object({
   capacity: z.number().int().min(1),
   equipment: z.string().optional(),
   labType: z.string().optional(),
+  roomTypeId: z.string().min(1).nullable().optional(),
   isActive: z.boolean().optional(),
 });
 
 export const sectionSchema = z.object({
   name: z.string().min(1),
-  code: z.string().min(1).transform((v) => v.toUpperCase()),
+  code: z
+    .string()
+    .min(1)
+    .transform((v) => v.toUpperCase()),
   departmentId: z.string().min(1),
   programId: z.string().min(1),
   semesterId: z.string().min(1),
@@ -170,6 +195,7 @@ export const constraintSchema = z.object({
 });
 
 export const timetableSchema = z.object({
+  instituteId: z.string().min(1).optional(),
   name: z.string().min(1),
   academicYearId: z.string().min(1),
   semesterId: z.string().min(1),
@@ -177,6 +203,7 @@ export const timetableSchema = z.object({
 });
 
 export const timetableEntrySchema = z.object({
+  practicalBatchId: z.string().min(1).nullable().optional(),
   courseOfferingId: z.string().min(1),
   facultyId: z.string().min(1),
   roomId: z.string().optional().nullable(),
@@ -190,6 +217,7 @@ export const timetableEntrySchema = z.object({
 });
 
 export const generateTimetableSchema = z.object({
+  instituteId: z.string().min(1).optional(),
   academicYearId: z.string().min(1),
   semesterId: z.string().min(1),
   departmentId: z.string().optional().nullable(),

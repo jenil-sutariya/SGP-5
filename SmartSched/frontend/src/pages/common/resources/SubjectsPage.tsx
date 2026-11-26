@@ -1,10 +1,17 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { subjectsApi, departmentsApi, institutesApi } from '@/api';
+import { subjectsApi, departmentsApi, institutesApi, roomsApi } from '@/api';
 import { ResourcePage, useInstituteScope } from '../ResourcePage';
 
 export function SubjectsPage() {
   const { user, instituteId } = useInstituteScope();
+  const { data: roomTypes = [] } = useQuery({ queryKey: ['room-types'], queryFn: async () => (await roomsApi.types()).data.data });
+  const requirementFields = [
+    { key: 'requiredRoomTypeId', label: 'Required room type (optional)', type: 'select' as const, options: roomTypes.map((r: any)=>({value:r.id,label:r.name})) },
+    { key: 'requiredEquipment', label: 'Required equipment (comma-separated)' },
+    { key: 'minRoomCapacity', label: 'Minimum venue capacity (optional)', type: 'number' as const },
+    { key: 'labHours', label: 'Consecutive lab periods', type: 'number' as const },
+  ];
   const isAdmin = user?.role?.name === 'ADMIN';
   const canCreate =
     user?.role?.name === 'ADMIN' ||
@@ -129,6 +136,7 @@ export function SubjectsPage() {
                 options: difficultyOptions,
               },
               { key: 'description', label: 'Description (optional)' },
+              ...requirementFields,
             ]
           : undefined
       }
@@ -145,6 +153,7 @@ export function SubjectsPage() {
           : undefined
       }
       editFields={[
+        ...requirementFields,
         { key: 'code', label: 'Code' },
         { key: 'name', label: 'Name' },
         { key: 'type', label: 'Type', type: 'select', options: typeOptions },
@@ -152,7 +161,7 @@ export function SubjectsPage() {
         { key: 'difficulty', label: 'Difficulty', type: 'select', options: difficultyOptions },
         { key: 'credits', label: 'Credits', type: 'number' },
       ]}
-      updateFn={(id, data) => subjectsApi.update(id, data)}
+      updateFn={(id, data) => subjectsApi.update(id, { ...data, requiredEquipment: data.requiredEquipment || null, requiredRoomTypeId: data.requiredRoomTypeId || null, minRoomCapacity: data.minRoomCapacity || null })}
       removeFn={(id) => subjectsApi.remove(id)}
     />
   );

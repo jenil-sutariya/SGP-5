@@ -1,8 +1,10 @@
+import { SessionEditor } from './SessionEditor';
 import { useMemo, useState, memo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Download,
+  Trash2,
   Printer,
   RefreshCw,
   AlertTriangle,
@@ -23,9 +25,14 @@ import { academicApi, timetableApi } from '@/api';
 import { Button, Badge, Skeleton } from '@/components/ui';
 import { GlassCard } from '@/components/common/GlassCard';
 import { cn } from '@/utils/cn';
+import { useAuthStore } from '@/store/authStore';
 import { useInstituteScope } from '../common/ResourcePage';
 
 type Entry = {
+  sessionId: string;
+  isLocked: boolean;
+  cancellationReason?: string | null;
+  date?: string;
   id: string;
   dayId: string;
   timeSlotId: string;
@@ -82,10 +89,14 @@ const EntryCard = memo(function EntryCard({
   entry,
   onDragStart,
   compact = false,
+  editable = false,
+  onEdit,
 }: {
   entry: Entry;
   onDragStart: (e: React.DragEvent, entryId: string) => void;
   compact?: boolean;
+  editable?: boolean;
+  onEdit?: (sessionId: string) => void;
 }) {
   const subjectCode = formatSubjectCode(entry.courseOffering?.subject?.code ?? '', compact);
   const subjectName = entry.courseOffering?.subject?.name;
@@ -95,7 +106,7 @@ const EntryCard = memo(function EntryCard({
 
   return (
     <div
-      draggable
+      draggable={editable && !entry.isLocked && !entry.cancellationReason}
       onDragStart={(e) => onDragStart(e, entry.id)}
       title={`${entry.courseOffering?.subject?.code ?? ''} - ${subjectName || ''}\nFaculty: ${entry.faculty?.user?.firstName ?? ''} ${entry.faculty?.user?.lastName ?? ''}\nRoom: ${roomCode}${batchName ? `\nBatch: ${batchName}` : ''}`}
       className={cn(
@@ -106,6 +117,8 @@ const EntryCard = memo(function EntryCard({
           : 'bg-gradient-to-br from-primary/10 via-primary/5 to-cyan-500/10 text-primary border-primary/25 dark:text-cyan-accent dark:border-cyan-accent/30'
       )}
     >
+{entry.cancellationReason && <p className="text-red-700 dark:text-red-300 font-bold text-[10px]">Cancelled · {entry.cancellationReason}</p>}
+      {editable && <button className="self-end text-[10px] underline no-print" onClick={()=>onEdit?.(entry.sessionId)}>{entry.isLocked ? 'Locked · Edit session' : 'Edit session'}</button>}
       {/* Subject Header */}
       <div className="flex items-center justify-between gap-1 min-w-0">
         <span className={cn('font-extrabold truncate tracking-tight text-foreground', compact ? 'text-[9.5px]' : 'text-xs')}>
@@ -148,6 +161,7 @@ const EntryCard = memo(function EntryCard({
 
 export default function TimetablePage() {
   const qc = useQueryClient();
+  const user = useAuthStore((state) => state.user);
   const { instituteId } = useInstituteScope();
   const [selectedId, setSelectedId] = useState<string>(
     () => sessionStorage.getItem('selected-timetable-id') ?? ''
@@ -155,10 +169,15 @@ export default function TimetablePage() {
   const [selectedSectionId, setSelectedSectionId] = useState<string>('');
   const [isFitWindow, setIsFitWindow] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [week, setWeek] = useState('');
+  const [template, setTemplate] = useState(false);
+  const [editingSession, setEditingSession] = useState<string | null>(null);
+  const isStudent = user?.role?.name === 'STUDENT';
+  const isManager = ['ADMIN','INSTITUTE_ADMIN','SCHEDULER','DEPARTMENT_HEAD'].includes(user?.role?.name || '');
   const [showUnassignedDrawer, setShowUnassignedDrawer] = useState<boolean>(false);
 
-  const { data: timetables, refetch: refetchList } = useQuery({
-    queryKey: ['timetables', instituteId ?? 'all'],
+  const { data: timetables, isLoading: isListLoading, refetch: refetchList } = useQuery({
+    queryKey: ['timetables', instituteId ?? 'all', user?.id],
     queryFn: async () => (await timetableApi.list({ limit: 50, sortBy: 'createdAt', sortOrder: 'desc', ...(instituteId ? { instituteId } : {}) })).data.data,
     staleTime: 60000,
   });
@@ -167,12 +186,13 @@ export default function TimetablePage() {
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
+    setWeek('');
     setSelectedSectionId('');
     sessionStorage.setItem('selected-timetable-id', id);
   };
 
   const { data: timetable, isLoading } = useQuery({
-    queryKey: ['timetable', activeId],
+    queryKey: ['timetable', activeId, user?.id],
     enabled: !!activeId,
     staleTime: 30000,
     queryFn: async () => {
@@ -189,15 +209,28 @@ export default function TimetablePage() {
     retry: false,
   });
 
+  const canManage = isManager && (user?.role?.name !== 'DEPARTMENT_HEAD' || timetable?.departmentId === user.departmentId);
+  const canEdit = canManage && ['DRAFT','GENERATED'].includes(timetable?.status) && template;
+  const { data: occurrences, isFetching: loadingWeek, isError: weekError } = useQuery({
+    queryKey: ['occurrences', activeId, week, user?.id], enabled: !!activeId && (!template || isStudent),
+    queryFn: async () => (await timetableApi.occurrences(activeId, week || undefined)).data.data,
+    staleTime: 0, refetchInterval: isStudent ? 15000 : false, retry: false,
+  });
+  const visibleEntries = weekError && (!template || isStudent) ? [] : template && !isStudent ? timetable?.entries : occurrences?.entries;
+
+  const calendarInstituteId = timetable?.instituteId ?? instituteId;
+
   const { data: days = [] } = useQuery({
-    queryKey: ['days', instituteId ?? 'all'],
-    queryFn: async () => (await academicApi.days({ ...(instituteId ? { instituteId } : {}) })).data.data,
+    queryKey: ['days', calendarInstituteId ?? 'all'],
+    queryFn: async () =>
+      (await academicApi.days({ ...(calendarInstituteId ? { instituteId: calendarInstituteId } : {}) })).data.data,
     staleTime: 300000,
   });
 
   const { data: slots = [] } = useQuery({
-    queryKey: ['slots', instituteId ?? 'all'],
-    queryFn: async () => (await academicApi.timeSlots({ ...(instituteId ? { instituteId } : {}) })).data.data,
+    queryKey: ['slots', calendarInstituteId ?? 'all'],
+    queryFn: async () =>
+      (await academicApi.timeSlots({ ...(calendarInstituteId ? { instituteId: calendarInstituteId } : {}) })).data.data,
     staleTime: 300000,
   });
 
@@ -226,7 +259,7 @@ export default function TimetablePage() {
 
   const entryMap = useMemo(() => {
     const map = new Map<string, Entry[]>();
-    const entries = (timetable?.entries ?? []) as Entry[];
+    const entries = (visibleEntries ?? []) as Entry[];
     let filtered = activeSectionId
       ? entries.filter((e) => e.section?.id === activeSectionId)
       : entries;
@@ -250,7 +283,7 @@ export default function TimetablePage() {
       map.get(key)!.push(e);
     }
     return map;
-  }, [timetable, activeSectionId, searchQuery]);
+  }, [visibleEntries, activeSectionId, searchQuery]);
 
   const unassignedSessions = useMemo(() => {
     const meta = timetable?.metadata as any;
@@ -262,12 +295,77 @@ export default function TimetablePage() {
       : list;
   }, [timetable, activeSectionId]);
 
+  const publicationMutation = useMutation({
+    mutationFn: ({ id, unpublish }: { id: string; unpublish: boolean }) =>
+      unpublish ? timetableApi.unpublish(id) : timetableApi.publish(id),
+    onSuccess: async (_response, { id: publishedId, unpublish }) => {
+      toast.success(unpublish ? 'Timetable unpublished' : 'Timetable published');
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['timetable', publishedId] }),
+        qc.invalidateQueries({ queryKey: ['timetables'] }),
+        qc.invalidateQueries({ queryKey: ['dashboard'] }),
+        qc.invalidateQueries({ queryKey: ['scheduler-status', publishedId] }),
+      ]);
+    },
+    onError: (error: unknown) => {
+      toast.error((error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Unable to update timetable publication');
+    },
+  });
+
+  const handlePublish = () => {
+    if (!timetable || timetable.status !== 'GENERATED' || publicationMutation.isPending) return;
+    if (!window.confirm('Publish "' + timetable.name + '"? This marks the entire timetable, including all divisions, as published.')) return;
+    publicationMutation.mutate({ id: timetable.id, unpublish: false });
+  };
+
+  const handleUnpublish = () => {
+    if (!timetable || timetable.status !== 'PUBLISHED' || publicationMutation.isPending) return;
+    if (!window.confirm('Unpublish "' + timetable.name + '"? It will return to Generated status. All scheduled entries will be kept.')) return;
+    publicationMutation.mutate({ id: timetable.id, unpublish: true });
+  };
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => timetableApi.remove(id),
+    onSuccess: async (_response, deletedId) => {
+      const remaining = (timetables ?? []).filter((item: { id: string }) => item.id !== deletedId);
+      const nextId = remaining[0]?.id ?? '';
+      qc.setQueriesData({ queryKey: ['timetables'] }, (cached: unknown) =>
+        Array.isArray(cached) ? cached.filter((item: { id: string }) => item.id !== deletedId) : cached
+      );
+      setSelectedId(nextId);
+      setSelectedSectionId('');
+      setShowUnassignedDrawer(false);
+      if (nextId) {
+        sessionStorage.setItem('selected-timetable-id', nextId);
+      } else {
+        sessionStorage.removeItem('selected-timetable-id');
+      }
+      qc.removeQueries({ queryKey: ['timetable', deletedId] });
+      qc.removeQueries({ queryKey: ['scheduler-status', deletedId] });
+      qc.removeQueries({ queryKey: ['conflicts', deletedId] });
+      toast.success('Timetable deleted');
+      await qc.invalidateQueries({ queryKey: ['timetables'] });
+    },
+    onError: (error: unknown) => {
+      toast.error((error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Unable to delete timetable');
+    },
+  });
+
+  const handleDelete = () => {
+    if (!timetable || deleteMutation.isPending) return;
+    if (!window.confirm(
+      'Delete "' + timetable.name + '"? This permanently removes the entire timetable, including all divisions, entries and conflicts.'
+    )) return;
+    deleteMutation.mutate(timetable.id);
+  };
+
   const moveMutation = useMutation({
     mutationFn: ({ entryId, dayId, timeSlotId }: { entryId: string; dayId: string; timeSlotId: string }) =>
-      timetableApi.updateEntry(entryId, { dayId, timeSlotId }),
+      timetableApi.updateSession(activeId, timetable.entries.find((entry: Entry) => entry.id === entryId).sessionId, { dayId, startTimeSlotId: timeSlotId }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['timetable', activeId] });
-      toast.success('Entry moved');
+      qc.invalidateQueries({ queryKey: ['occurrences'] });
+      toast.success('Whole session moved');
     },
     onError: (e: unknown) => {
       toast.error((e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Move failed');
@@ -280,7 +378,7 @@ export default function TimetablePage() {
 
   const onDrop = (e: React.DragEvent, dayId: string, timeSlotId: string, isLunch: boolean) => {
     e.preventDefault();
-    if (isLunch) return;
+    if (!canEdit || isLunch || publicationMutation.isPending || deleteMutation.isPending) return;
     const entryId = e.dataTransfer.getData('entryId');
     if (entryId) moveMutation.mutate({ entryId, dayId, timeSlotId });
   };
@@ -303,6 +401,9 @@ export default function TimetablePage() {
 
   return (
     <div className={cn('space-y-4', isFitWindow && 'h-[calc(100vh-5.5rem)] flex flex-col space-y-3 overflow-hidden')}>
+{editingSession && timetable && <SessionEditor key={editingSession} timetable={timetable} entries={timetable.entries.filter((entry: Entry)=>entry.sessionId===editingSession)} days={workingDays} slots={teachingSlots} onClose={()=>setEditingSession(null)}/>}
+      {weekError && !template && <p role="alert" className="text-sm text-red-600">This timetable is unavailable. It may have been unpublished. Refresh the timetable list.</p>}
+      {loadingWeek && !template && <p role="status" className="text-sm text-muted">Loading this week…</p>}
       {/* Futuristic Control Toolbar Header */}
       <GlassCard className={cn('p-4 border border-white/20 dark:border-white/10 shadow-xl', isFitWindow && 'p-2.5 px-4 shrink-0')}>
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
@@ -317,15 +418,17 @@ export default function TimetablePage() {
                   Academic Timetable
                 </h2>
                 <Badge variant="default" className="text-[10px] font-bold bg-gold/15 text-gold border border-gold/30 px-2 py-0.5 rounded-full">
-                  Semester 2026
+                  {timetable?.semester?.name || 'Semester'}
                 </Badge>
               </div>
-              <p className="text-xs text-muted font-medium">Interactive grid view filtered by division & batch</p>
+              <p className="text-xs text-muted font-medium">{isStudent ? 'Published teaching for your division and batch' : template ? 'Weekly template · drag a card to move the entire session' : 'Dated teaching · cancellations shown on affected days'}</p>
             </div>
           </div>
 
           {/* Controls Bar */}
           <div className="no-print flex flex-wrap gap-2 items-center">
+{!isStudent && <Button variant="outline" onClick={()=>setTemplate(!template)}>{template ? 'Show dated week' : 'Edit weekly template'}</Button>}
+            {(!template || isStudent) && <label className="text-xs">Week containing <input aria-label="Week containing" type="date" className="rounded-lg border border-border bg-background p-1.5" value={week || occurrences?.week || ''} onChange={e=>setWeek(e.target.value)}/></label>}
             {/* Search filter input */}
             <div className="relative">
               <Search size={13} className="absolute left-2.5 top-2.5 text-muted" />
@@ -346,6 +449,7 @@ export default function TimetablePage() {
             {/* Timetable Selector */}
             <select
               className="h-8.5 rounded-xl border border-border bg-white/70 px-2.5 text-xs font-semibold dark:bg-slate-900/70 focus:outline-none focus:ring-2 focus:ring-primary/40 shadow-xs"
+              disabled={deleteMutation.isPending || publicationMutation.isPending}
               value={activeId ?? ''}
               onChange={(e) => handleSelect(e.target.value)}
             >
@@ -385,6 +489,35 @@ export default function TimetablePage() {
             </Button>
 
             {/* Actions */}
+            {canManage && timetable?.status === 'GENERATED' && (
+              <Button
+                className="rounded-xl h-8.5 px-3 gap-1.5 font-semibold text-xs"
+                onClick={handlePublish}
+                disabled={publicationMutation.isPending || deleteMutation.isPending || moveMutation.isPending || isLoading}
+              >
+                <CheckCircle2 size={14} /> {publicationMutation.isPending ? 'Publishing…' : 'Publish timetable'}
+              </Button>
+            )}
+            {['ADMIN', 'SCHEDULER'].includes(user?.role?.name ?? '') && timetable?.status === 'PUBLISHED' && (
+              <Button
+                variant="outline"
+                className="rounded-xl h-8.5 px-3 gap-1.5 font-semibold text-xs"
+                onClick={handleUnpublish}
+                disabled={publicationMutation.isPending || deleteMutation.isPending || moveMutation.isPending || isLoading}
+              >
+                <RefreshCw size={14} /> {publicationMutation.isPending ? 'Unpublishing…' : 'Unpublish timetable'}
+              </Button>
+            )}
+            {user?.role?.name === 'ADMIN' && timetable?.status === 'GENERATED' && (
+              <Button
+                variant="outline"
+                className="rounded-xl h-8.5 px-2.5 gap-1.5 font-semibold text-xs text-red-600 border-red-300 hover:bg-red-50 dark:hover:bg-red-950"
+                onClick={handleDelete}
+                disabled={deleteMutation.isPending || publicationMutation.isPending || isLoading}
+              >
+                <Trash2 size={13} /> {deleteMutation.isPending ? 'Deleting…' : 'Delete timetable'}
+              </Button>
+            )}
             <Button
               variant="outline"
               className="rounded-xl h-8.5 px-2.5 gap-1.5 font-semibold text-xs"
@@ -406,8 +539,12 @@ export default function TimetablePage() {
       </GlassCard>
 
       {/* Grid Viewport Container */}
-      {isLoading || !activeId ? (
+      {isListLoading || isLoading ? (
         <Skeleton className="h-[500px] rounded-3xl" />
+      ) : !activeId ? (
+        <GlassCard className="p-8 text-center text-muted">
+          No timetables available. Generate a timetable from the Scheduler page.
+        </GlassCard>
       ) : (
         <GlassCard className={cn('print-area border border-white/20 dark:border-white/10 shadow-2xl', isFitWindow ? 'flex-1 min-h-0 flex flex-col p-3 overflow-hidden' : 'p-4 overflow-x-auto')}>
           {/* Sub Header Metrics & Badges */}
@@ -512,7 +649,7 @@ export default function TimetablePage() {
                               )}
                             >
                               {entriesList.map((entry) => (
-                                <EntryCard key={entry.id} entry={entry} onDragStart={onDragStart} compact={true} />
+                                <EntryCard key={entry.id} entry={entry} editable={canEdit} onEdit={setEditingSession} onDragStart={onDragStart} compact={true} />
                               ))}
                             </div>
                           ) : (
@@ -564,7 +701,7 @@ export default function TimetablePage() {
                             {entriesList.length > 0 ? (
                               <div className="flex flex-col gap-2">
                                 {entriesList.map((entry) => (
-                                  <EntryCard key={entry.id} entry={entry} onDragStart={onDragStart} compact={false} />
+                                  <EntryCard key={entry.id} entry={entry} editable={canEdit} onEdit={setEditingSession} onDragStart={onDragStart} compact={false} />
                                 ))}
                               </div>
                             ) : (

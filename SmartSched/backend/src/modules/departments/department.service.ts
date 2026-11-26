@@ -59,7 +59,17 @@ export class DepartmentService {
     return prisma.department.create({ data, include: { institute: true } });
   }
 
-  async update(id: string, data: Partial<{ code: string; name: string; description: string; buildingId: string | null; headId: string | null; isActive: boolean }>) {
+  async update(
+    id: string,
+    data: Partial<{
+      code: string;
+      name: string;
+      description: string;
+      buildingId: string | null;
+      headId: string | null;
+      isActive: boolean;
+    }>
+  ) {
     await this.getById(id);
     return prisma.department.update({ where: { id }, data });
   }
@@ -86,7 +96,16 @@ export class FacultyService {
         take: limit,
         orderBy: { [sortBy]: sortOrder },
         include: {
-          user: { select: { id: true, email: true, firstName: true, lastName: true, phone: true, isActive: true } },
+          user: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              phone: true,
+              isActive: true,
+            },
+          },
           department: true,
         },
       }),
@@ -126,13 +145,19 @@ export class FacultyService {
   }) {
     const existing = await prisma.faculty.findUnique({ where: { employeeId: input.employeeId } });
     if (existing) throw new ConflictError('Employee ID already exists');
-    const emailExists = await prisma.user.findUnique({ where: { email: input.email.toLowerCase() } });
+    const emailExists = await prisma.user.findUnique({
+      where: { email: input.email.toLowerCase() },
+    });
     if (emailExists) throw new ConflictError('Email already registered');
 
     const role = await prisma.role.findUnique({ where: { name: RoleName.FACULTY } });
     if (!role) throw new ValidationError('Faculty role not seeded');
 
-    if (input.email && !input.email.toLowerCase().endsWith('@charusat.edu.in') && !input.email.toLowerCase().endsWith('@charusat.ac.in')) {
+    if (
+      input.email &&
+      !input.email.toLowerCase().endsWith('@charusat.edu.in') &&
+      !input.email.toLowerCase().endsWith('@charusat.ac.in')
+    ) {
       throw new ValidationError('Professor email must be a CHARUSAT address (@charusat.edu.in)');
     }
     const passwordHash = await hashPassword(input.password ?? 'Faculty@123');
@@ -147,6 +172,9 @@ export class FacultyService {
           phone: input.phone,
           roleId: role.id,
           departmentId: input.departmentId,
+          instituteId: (
+            await tx.department.findUniqueOrThrow({ where: { id: input.departmentId } })
+          ).instituteId,
           settings: { create: {} },
         },
       });
@@ -166,7 +194,17 @@ export class FacultyService {
     });
   }
 
-  async update(id: string, data: Partial<{ designation: string; specialization: string; maxHoursPerWeek: number; maxHoursPerDay: number; isActive: boolean; departmentId: string }>) {
+  async update(
+    id: string,
+    data: Partial<{
+      designation: string;
+      specialization: string;
+      maxHoursPerWeek: number;
+      maxHoursPerDay: number;
+      isActive: boolean;
+      departmentId: string;
+    }>
+  ) {
     await this.getById(id);
     return prisma.faculty.update({
       where: { id },
@@ -256,7 +294,10 @@ export class FacultyService {
     });
   }
 
-  async setAvailability(facultyId: string, slots: { dayId: string; timeSlotId: string; isAvailable: boolean }[]) {
+  async setAvailability(
+    facultyId: string,
+    slots: { dayId: string; timeSlotId: string; isAvailable: boolean }[]
+  ) {
     await this.getById(facultyId);
     await prisma.$transaction([
       prisma.facultyAvailability.deleteMany({ where: { facultyId } }),
@@ -278,7 +319,16 @@ export class FacultyService {
     });
   }
 
-  async addPreference(facultyId: string, data: { dayId?: string | null; timeSlotId?: string | null; preferenceType: PreferenceType; weight?: number; notes?: string }) {
+  async addPreference(
+    facultyId: string,
+    data: {
+      dayId?: string | null;
+      timeSlotId?: string | null;
+      preferenceType: PreferenceType;
+      weight?: number;
+      notes?: string;
+    }
+  ) {
     await this.getById(facultyId);
     return prisma.facultyPreference.create({
       data: { facultyId, ...data },
@@ -286,12 +336,16 @@ export class FacultyService {
   }
 
   async getPreferences(facultyId: string) {
-    return prisma.facultyPreference.findMany({ where: { facultyId }, include: { day: true, timeSlot: true } });
+    return prisma.facultyPreference.findMany({
+      where: { facultyId },
+      include: { day: true, timeSlot: true },
+    });
   }
 
   async addLeave(facultyId: string, data: { startDate: Date; endDate: Date; reason?: string }) {
     await this.getById(facultyId);
-    if (data.endDate < data.startDate) throw new ValidationError('End date must be after start date');
+    if (data.endDate < data.startDate)
+      throw new ValidationError('End date must be after start date');
     return prisma.facultyLeave.create({ data: { facultyId, ...data } });
   }
 
@@ -307,7 +361,9 @@ export class FacultyService {
 }
 
 export class StudentService {
-  async list(query: PaginationQuery & { departmentId?: string; sectionId?: string; instituteId?: string }) {
+  async list(
+    query: PaginationQuery & { departmentId?: string; sectionId?: string; instituteId?: string }
+  ) {
     const { page, limit, skip, sortBy, sortOrder, search } = getPagination(query);
     const where: any = {
       ...(query.departmentId ? { departmentId: query.departmentId } : {}),
@@ -336,7 +392,9 @@ export class StudentService {
         take: limit,
         orderBy,
         include: {
-          user: { select: { id: true, email: true, firstName: true, lastName: true, isActive: true } },
+          user: {
+            select: { id: true, email: true, firstName: true, lastName: true, isActive: true },
+          },
           department: true,
           section: true,
         },
@@ -368,14 +426,21 @@ export class StudentService {
     batchYear: number;
     currentSemester?: number;
   }) {
-    const existing = await prisma.student.findUnique({ where: { enrollmentNo: input.enrollmentNo } });
+    const existing = await prisma.student.findUnique({
+      where: { enrollmentNo: input.enrollmentNo },
+    });
     if (existing) throw new ConflictError('Enrollment number already exists');
-    const emailExists = await prisma.user.findUnique({ where: { email: input.email.toLowerCase() } });
+    const emailExists = await prisma.user.findUnique({
+      where: { email: input.email.toLowerCase() },
+    });
     if (emailExists) throw new ConflictError('Email already registered');
 
     const role = await prisma.role.findUnique({ where: { name: RoleName.STUDENT } });
     if (!role) throw new ValidationError('Student role not seeded');
-    if (!input.email.toLowerCase().endsWith('@charusat.edu.in') && !input.email.toLowerCase().endsWith('@charusat.ac.in')) {
+    if (
+      !input.email.toLowerCase().endsWith('@charusat.edu.in') &&
+      !input.email.toLowerCase().endsWith('@charusat.ac.in')
+    ) {
       throw new ValidationError('Student email must be a CHARUSAT address (@charusat.edu.in)');
     }
     const passwordHash = await hashPassword(input.password ?? 'Student@123');
@@ -390,6 +455,9 @@ export class StudentService {
           phone: input.phone,
           roleId: role.id,
           departmentId: input.departmentId,
+          instituteId: (
+            await tx.department.findUniqueOrThrow({ where: { id: input.departmentId } })
+          ).instituteId,
           settings: { create: {} },
         },
       });
@@ -407,7 +475,10 @@ export class StudentService {
     });
   }
 
-  async update(id: string, data: Partial<{ sectionId: string | null; currentSemester: number; isActive: boolean }>) {
+  async update(
+    id: string,
+    data: Partial<{ sectionId: string | null; currentSemester: number; isActive: boolean }>
+  ) {
     await this.getById(id);
     const { sectionId, ...rest } = data;
     return prisma.student.update({

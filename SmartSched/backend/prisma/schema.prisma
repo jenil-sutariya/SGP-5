@@ -196,6 +196,7 @@ model Institute {
   days        Day[]
   timeSlots   TimeSlot[]
   holidays    Holiday[]
+  timetables  Timetable[]
 
   @@map("institutes")
 }
@@ -545,6 +546,7 @@ model RoomType {
   updatedAt   DateTime     @updatedAt
 
   rooms               Room[]
+  laboratories        Laboratory[]
   subjectRequirements SubjectRequirement[]
 
   @@map("room_types")
@@ -588,12 +590,14 @@ model Laboratory {
   capacity     Int
   equipment    String?
   labType      String?
+  roomTypeId   String?
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   building         Building        @relation(fields: [buildingId], references: [id])
   department       Department      @relation(fields: [departmentId], references: [id])
+  roomType         RoomType?       @relation(fields: [roomTypeId], references: [id])
   timetableEntries TimetableEntry[]
 
   @@index([departmentId])
@@ -727,6 +731,7 @@ model PracticalBatch {
   sectionId String
   capacity  Int      @default(20)
   isActive  Boolean  @default(true)
+  reservationIndex Int @unique @default(autoincrement())
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -747,6 +752,7 @@ model Timetable {
   academicYearId String
   semesterId     String
   departmentId   String?
+  instituteId    String
   status         TimetableStatus @default(DRAFT)
   version        Int             @default(1)
   score          Float?
@@ -760,18 +766,21 @@ model Timetable {
   academicYear AcademicYear        @relation(fields: [academicYearId], references: [id])
   semester     Semester            @relation(fields: [semesterId], references: [id])
   department   Department?         @relation(fields: [departmentId], references: [id])
+  institute    Institute           @relation(fields: [instituteId], references: [id])
   entries      TimetableEntry[]
   conflicts    TimetableConflict[]
 
   @@index([semesterId])
   @@index([departmentId])
   @@index([status])
+  @@index([instituteId])
   @@map("timetables")
 }
 
 model TimetableEntry {
   id               String   @id @default(cuid())
   timetableId      String
+  sessionId        String   @default(cuid())
   courseOfferingId String
   facultyId        String
   roomId           String?
@@ -795,16 +804,32 @@ model TimetableEntry {
   practicalBatch PracticalBatch? @relation(fields: [practicalBatchId], references: [id])
   day            Day            @relation(fields: [dayId], references: [id])
   timeSlot       TimeSlot       @relation(fields: [timeSlotId], references: [id])
+  reservations   TimetableReservation[]
 
-  @@unique([timetableId, dayId, timeSlotId, roomId])
-  @@unique([timetableId, dayId, timeSlotId, facultyId])
-  @@unique([timetableId, dayId, timeSlotId, practicalBatchId])
   @@index([timetableId])
   @@index([facultyId])
   @@index([roomId])
   @@index([dayId, timeSlotId])
   @@index([practicalBatchId])
+  @@index([timetableId, sessionId])
   @@map("timetable_entries")
+}
+
+// Maintained by database triggers, including writes made outside Prisma.
+// The GiST exclusion constraint is defined in the SQL migration.
+model TimetableReservation {
+  id           String @id
+  entryId      String
+  resourceKind String
+  resourceId   String
+  serviceDate  DateTime @db.Date
+  period       Unsupported("tsrange")
+  audience     Unsupported("int8range")
+  entry        TimetableEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+
+  @@index([entryId])
+  @@index([serviceDate])
+  @@map("timetable_reservations")
 }
 
 model TimetableConflict {
@@ -943,4 +968,13 @@ model SpecialEvent {
 
   @@index([startDate, endDate])
   @@map("special_events")
+}
+
+// Internal deferred-validation queue; only scheduling triggers may write it.
+model SchedulingValidationQueue {
+  transaction_id BigInt
+  scope          String @default("*")
+  @@id([transaction_id, scope])
+  @@map("scheduling_validation_queue")
+  @@ignore
 }

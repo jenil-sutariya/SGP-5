@@ -1,10 +1,14 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
+import { Eye } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { labsApi, roomsApi, institutesApi, departmentsApi } from '@/api';
 import { ResourcePage, useInstituteScope } from '../ResourcePage';
 
 export function LabsPage() {
   const { user, instituteId } = useInstituteScope();
+  const { data: roomTypes = [] } = useQuery({ queryKey: ['room-types'], queryFn: async () => (await roomsApi.types()).data.data });
+  const roomTypeField = { key: 'roomTypeId', label: 'Room type for subject requirements', type: 'select' as const, options: roomTypes.map((r:any)=>({value:r.id,label:r.name})) };
   const isAdmin = user?.role?.name === 'ADMIN';
   const canCreate =
     user?.role?.name === 'ADMIN' ||
@@ -83,6 +87,17 @@ export function LabsPage() {
         })).data
       }
       columns={[
+        {
+          key: 'timetable', label: 'Timetable',
+          render: (row) => (
+            <Link to={'/labs/' + encodeURIComponent(String(row.id)) + '/timetable'}
+              title={'View timetable for ' + String(row.code)}
+              aria-label={'View timetable for ' + String(row.code)}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-primary hover:bg-primary/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+              <Eye size={17} />
+            </Link>
+          ),
+        },
         { key: 'code', label: 'Code' },
         { key: 'name', label: 'Name' },
         { key: 'capacity', label: 'Capacity' },
@@ -126,7 +141,8 @@ export function LabsPage() {
               { key: 'capacity', label: 'Capacity', type: 'number' as const },
               { key: 'floor', label: 'Floor', type: 'number' as const },
               { key: 'labType', label: 'Lab Type (e.g. Computer, Chemistry)' },
-              { key: 'equipment', label: 'Equipment (optional)' },
+              { key: 'equipment', label: 'Equipment (comma-separated)' },
+              roomTypeField,
             ]
           : undefined
       }
@@ -145,6 +161,7 @@ export function LabsPage() {
           : undefined
       }
       editFields={[
+        roomTypeField,
         { key: 'code', label: 'Code' },
         { key: 'name', label: 'Name' },
         { key: 'capacity', label: 'Capacity', type: 'number' },
@@ -152,7 +169,7 @@ export function LabsPage() {
         { key: 'labType', label: 'Lab Type' },
         { key: 'equipment', label: 'Equipment' },
       ]}
-      updateFn={(id, data) => labsApi.update(id, data)}
+      updateFn={(id, data) => labsApi.update(id, { ...data, roomTypeId: data.roomTypeId || null })}
       removeFn={(id) => labsApi.remove(id)}
     />
   );

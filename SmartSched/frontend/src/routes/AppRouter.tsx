@@ -9,6 +9,7 @@ import ForgotPasswordPage from '@/pages/Auth/ForgotPasswordPage';
 // Core pages
 import DashboardPage from '@/pages/Dashboard/DashboardPage';
 import TimetablePage from '@/pages/Timetable/TimetablePage';
+import ResourceTimetablePage from '@/pages/Timetable/ResourceTimetablePage';
 import SchedulerPage from '@/pages/Scheduler/SchedulerPage';
 import SettingsPage  from '@/pages/Settings/SettingsPage';
 import ProfilePage   from '@/pages/Profile/ProfilePage';
@@ -75,6 +76,8 @@ export default function AppRouter() {
         <Route path="/faculty"        element={<FeatureGuard featureKey="faculty"><FacultyPage /></FeatureGuard>} />
         <Route path="/courses"        element={<FeatureGuard featureKey="courses"><CoursesPage /></FeatureGuard>} />
         <Route path="/subjects"       element={<FeatureGuard featureKey="subjects"><SubjectsPage /></FeatureGuard>} />
+        <Route path="/rooms/:resourceId/timetable" element={<FeatureGuard featureKey="rooms"><ResourceTimetablePage kind="room" /></FeatureGuard>} />
+        <Route path="/labs/:resourceId/timetable" element={<FeatureGuard featureKey="labs"><ResourceTimetablePage kind="lab" /></FeatureGuard>} />
         <Route path="/rooms"          element={<FeatureGuard featureKey="rooms"><RoomsPage /></FeatureGuard>} />
         <Route path="/labs"           element={<FeatureGuard featureKey="labs"><LabsPage /></FeatureGuard>} />
         <Route path="/scheduler"      element={<FeatureGuard featureKey="scheduler"><SchedulerPage /></FeatureGuard>} />

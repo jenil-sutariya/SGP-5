@@ -1,3 +1,4 @@
+import { HolidaySettings } from './HolidaySettings';
 import { Card } from '@/components/ui';
 
 export default function SettingsPage() {
@@ -29,6 +30,7 @@ export default function SettingsPage() {
           </a>
         </p>
       </div>
+      <HolidaySettings />
     </Card>
   );
 }

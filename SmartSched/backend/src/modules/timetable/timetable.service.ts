@@ -1,14 +1,21 @@
-import { TimetableStatus } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { dateKey, datedWeekOccurrences } from './occurrence.rules';
+import { TimetableStatus, Prisma } from '@prisma/client';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import prisma from '../../database/prisma';
 import { NotFoundError, ConflictError } from '../../utils/AppError';
 import { getPagination, PaginationQuery } from '../../utils/pagination';
-import { conflictService } from './conflict.service';
+import { ConflictService } from './conflict.service';
+import { withScheduleWrite } from '../scheduler/scheduler.bookings';
+import { assertTeachingComplete } from './timetable.completeness';
+import { validateEntryInstitute } from './timetable.institute';
+import { TimetableAccess, facultyNameSelect } from './timetable.access';
+import { ValidationError } from '../../utils/AppError';
 
 const entryInclude = {
   courseOffering: { include: { subject: true, course: true } },
-  faculty: { include: { user: true } },
+  faculty: { include: { user: { select: facultyNameSelect } } },
   room: true,
   laboratory: true,
   day: true,
@@ -18,24 +25,48 @@ const entryInclude = {
 } as const;
 
 export class TimetableService {
-  async list(query: PaginationQuery & { semesterId?: string; departmentId?: string; status?: string; instituteId?: string }) {
+  constructor(
+    private db: Prisma.TransactionClient = prisma,
+    private access?: TimetableAccess
+  ) {}
+
+  private async assertNoConflicts(id: string) {
+    const conflicts = await new ConflictService(this.db).detectAndPersist(id);
+    if (conflicts.length)
+      throw new ConflictError(
+        'This change conflicts with scheduled teaching. No changes were saved.',
+        conflicts
+      );
+  }
+
+  private async assertEditable(id: string) {
+    if (this.access) await this.access.assertTimetable(id, true, this.db);
+    const timetable = await this.getById(id);
+    if (timetable.status === TimetableStatus.PUBLISHED)
+      throw new ConflictError('Unpublish the timetable before editing entries');
+    if (timetable.status === TimetableStatus.ARCHIVED)
+      throw new ConflictError('Archived timetables cannot be edited');
+    return timetable;
+  }
+
+  async list(
+    query: PaginationQuery & {
+      semesterId?: string;
+      departmentId?: string;
+      status?: string;
+      instituteId?: string;
+    }
+  ) {
     const { page, limit, skip, sortBy, sortOrder } = getPagination(query);
-    const where = {
+    const where: Prisma.TimetableWhereInput = {
+      AND: [this.access?.timetableWhere || {}],
       ...(query.semesterId ? { semesterId: query.semesterId } : {}),
       ...(query.departmentId ? { departmentId: query.departmentId } : {}),
       ...(query.status ? { status: query.status as TimetableStatus } : {}),
-      ...(query.instituteId
-        ? {
-            OR: [
-              { department: { instituteId: query.instituteId } },
-              { entries: { some: { section: { department: { instituteId: query.instituteId } } } } },
-              { entries: { some: { courseOffering: { course: { department: { instituteId: query.instituteId } } } } } },
-            ],
-          }
-        : {}),
+      ...(query.instituteId ? { instituteId: query.instituteId } : {}),
     };
     const [data, total] = await Promise.all([
-      prisma.timetable.findMany({
+      this.db.timetable.findMany({
         where,
         skip,
         take: limit,
@@ -44,425 +75,452 @@ export class TimetableService {
           academicYear: true,
           semester: true,
           department: true,
-          _count: { select: { entries: true, conflicts: true } },
+          _count: {
+            select: {
+              entries: { where: this.access?.entryWhere },
+              conflicts: !this.access?.restricted,
+            },
+          },
         },
       }),
-      prisma.timetable.count({ where }),
+      this.db.timetable.count({ where }),
     ]);
-    return { data, total, page, limit };
+    return {
+      data: this.access?.restricted ? data.map((tt) => ({ ...tt, metadata: null })) : data,
+      total,
+      page,
+      limit,
+    };
   }
 
   async getById(id: string, instituteId?: string) {
-    const tt = await prisma.timetable.findUnique({
-      where: { id },
+    if (this.access) await this.access.assertTimetable(id, false, this.db);
+    const tt = await this.db.timetable.findFirst({
+      where: {
+        id,
+        AND: [this.access?.timetableWhere || {}],
+        ...(instituteId ? { instituteId } : {}),
+      },
       include: {
         academicYear: true,
         semester: true,
         department: true,
-        entries: {
-          where: instituteId
-            ? {
-                OR: [
-                  { section: { department: { instituteId } } },
-                  { courseOffering: { course: { department: { instituteId } } } },
-                  { courseOffering: { subject: { department: { instituteId } } } },
-                  { faculty: { department: { instituteId } } },
-                ],
-              }
-            : undefined,
-          include: entryInclude,
-        },
-        conflicts: true,
+        entries: { where: this.access?.entryWhere, include: entryInclude },
+        conflicts: !this.access?.restricted,
       },
     });
     if (!tt) throw new NotFoundError('Timetable');
-
-    // Auto-fix legacy entries based strictly on subject.type:
-    // - LAB -> Laboratory (laboratoryId)
-    // - PRACTICAL -> Classroom (roomId)
-    // - THEORY -> Classroom (roomId)
-    const invalidEntries = tt.entries.filter((e) => {
-      const s = e.courseOffering?.subject;
-      if (!s) return false;
-      if (s.type === 'LAB' && (!e.laboratoryId || !e.practicalBatchId)) return true;
-      if (s.type === 'PRACTICAL' && !e.roomId) return true;
-      if (s.type === 'THEORY' && !e.roomId) return true;
-      return false;
-    });
-
-    if (invalidEntries.length > 0) {
-      const labs = await prisma.laboratory.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } });
-      const rooms = await prisma.room.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } });
-
-      const sectionIds = Array.from(new Set(invalidEntries.map((e) => e.sectionId).filter(Boolean))) as string[];
-      const sectionsWithBatches = await prisma.section.findMany({
-        where: { id: { in: sectionIds } },
-        include: { practicalBatches: { orderBy: { name: 'asc' } } },
-      });
-      const sectionBatchMap = new Map(sectionsWithBatches.map((sec) => [sec.id, sec.practicalBatches]));
-
-      for (let idx = 0; idx < invalidEntries.length; idx++) {
-        const entry = invalidEntries[idx];
-        const s = entry.courseOffering?.subject;
-        const deptId = s?.departmentId || entry.section?.departmentId;
-
-        if (s?.type === 'LAB') {
-          const deptLabs = labs.filter((l) => l.departmentId === deptId);
-          const availableLabs = deptLabs.length > 0 ? deptLabs : labs;
-          const assignedLab = entry.laboratoryId ? null : availableLabs[idx % availableLabs.length];
-
-          const secBatches = entry.sectionId ? (sectionBatchMap.get(entry.sectionId) ?? []) : [];
-          const assignedBatch = entry.practicalBatchId
-            ? null
-            : secBatches.length > 0
-            ? secBatches[idx % secBatches.length]
-            : null;
-
-          await prisma.timetableEntry.update({
-            where: { id: entry.id },
-            data: {
-              isLab: true,
-              roomId: null,
-              ...(assignedLab ? { laboratoryId: assignedLab.id } : {}),
-              ...(assignedBatch ? { practicalBatchId: assignedBatch.id } : {}),
-            },
-          });
-        } else {
-          // PRACTICAL or THEORY -> Conducted in Classroom (roomId)
-          const deptRooms = rooms.filter((r) => r.departmentId === deptId);
-          const availableRooms = deptRooms.length > 0 ? deptRooms : rooms;
-          const assignedRoom = entry.roomId ? null : availableRooms[idx % availableRooms.length];
-
-          await prisma.timetableEntry.update({
-            where: { id: entry.id },
-            data: {
-              isLab: false,
-              laboratoryId: null,
-              ...(assignedRoom ? { roomId: assignedRoom.id } : {}),
-            },
-          });
-        }
-      }
-
-      return prisma.timetable.findUnique({
-        where: { id },
-        include: {
-          academicYear: true,
-          semester: true,
-          department: true,
-          entries: {
-            where: instituteId
-              ? {
-                  OR: [
-                    { section: { department: { instituteId } } },
-                    { courseOffering: { course: { department: { instituteId } } } },
-                    { courseOffering: { subject: { department: { instituteId } } } },
-                    { faculty: { department: { instituteId } } },
-                  ],
-                }
-              : undefined,
-            include: entryInclude,
-          },
-          conflicts: true,
-        },
-      }) as any;
-    }
-    // Clean up any overlapping theory entries that conflict with practical batch sessions in the same time slot
-    const labSlotKeys = new Set<string>();
-    for (const e of tt.entries) {
-      if ((e.isLab || e.practicalBatchId) && e.sectionId) {
-        labSlotKeys.add(`${e.dayId}|${e.timeSlotId}|${e.sectionId}`);
-      }
-    }
-
-    const conflictingTheoryIds: string[] = [];
-    for (const e of tt.entries) {
-      if (!e.isLab && !e.practicalBatchId && e.sectionId) {
-        const k = `${e.dayId}|${e.timeSlotId}|${e.sectionId}`;
-        if (labSlotKeys.has(k)) {
-          conflictingTheoryIds.push(e.id);
-        }
-      }
-    }
-
-    if (conflictingTheoryIds.length > 0) {
-      await prisma.timetableEntry.deleteMany({
-        where: { id: { in: conflictingTheoryIds } },
-      });
-      return prisma.timetable.findUnique({
-        where: { id },
-        include: {
-          academicYear: true,
-          semester: true,
-          department: true,
-          entries: {
-            where: instituteId
-              ? {
-                  OR: [
-                    { section: { department: { instituteId } } },
-                    { courseOffering: { course: { department: { instituteId } } } },
-                    { courseOffering: { subject: { department: { instituteId } } } },
-                    { faculty: { department: { instituteId } } },
-                  ],
-                }
-              : undefined,
-            include: entryInclude,
-          },
-          conflicts: true,
-        },
-      }) as any;
-    }
-    // Enforce 2 continuous hours for every Lab session (ensure paired timeSlotId exists on the same day)
-    const timeSlotsList = await prisma.timeSlot.findMany({
-      where: { isActive: true, isLunchBreak: false },
-      orderBy: { order: 'asc' },
-    });
-
-    const slotByOrder = new Map(timeSlotsList.map((s) => [s.order, s.id]));
-    const orderBySlot = new Map(timeSlotsList.map((s) => [s.id, s.order]));
-
-    const getPairedSlotId = (slotId: string): string | null => {
-      const order = orderBySlot.get(slotId);
-      if (!order) return null;
-      if (order === 1) return slotByOrder.get(2) ?? null;
-      if (order === 2) return slotByOrder.get(1) ?? null;
-      if (order === 4) return slotByOrder.get(5) ?? null;
-      if (order === 5) return slotByOrder.get(4) ?? null;
-      if (order === 7) return slotByOrder.get(8) ?? null;
-      if (order === 8) return slotByOrder.get(7) ?? null;
-      return null;
-    };
-
-    const labEntries = tt.entries.filter((e) => {
-      const s = e.courseOffering?.subject;
-      return e.isLab || s?.type === 'LAB' || (e.practicalBatchId != null);
-    });
-
-    let createdPairs = false;
-
-    for (const entry of labEntries) {
-      const pairedSlotId = getPairedSlotId(entry.timeSlotId);
-      if (!pairedSlotId) continue;
-
-      const exists = tt.entries.some((e) =>
-        e.dayId === entry.dayId &&
-        e.timeSlotId === pairedSlotId &&
-        e.courseOfferingId === entry.courseOfferingId &&
-        (e.practicalBatchId === entry.practicalBatchId || (!e.practicalBatchId && !entry.practicalBatchId))
-      );
-
-      if (!exists) {
-        await prisma.timetableEntry.deleteMany({
-          where: {
-            timetableId: id,
-            dayId: entry.dayId,
-            timeSlotId: pairedSlotId,
-            OR: [
-              ...(entry.sectionId ? [{ sectionId: entry.sectionId, isLab: false }] : []),
-              { facultyId: entry.facultyId, isLab: false },
-            ],
-          },
-        });
-
-        await prisma.timetableEntry.create({
-          data: {
-            timetableId: id,
-            courseOfferingId: entry.courseOfferingId,
-            facultyId: entry.facultyId,
-            laboratoryId: entry.laboratoryId,
-            roomId: entry.roomId,
-            sectionId: entry.sectionId,
-            practicalBatchId: entry.practicalBatchId,
-            dayId: entry.dayId,
-            timeSlotId: pairedSlotId,
-            isLab: true,
-          },
-        });
-        createdPairs = true;
-      }
-    }
-
-    if (createdPairs) {
-      return prisma.timetable.findUnique({
-        where: { id },
-        include: {
-          academicYear: true,
-          semester: true,
-          department: true,
-          entries: {
-            where: instituteId
-              ? {
-                  OR: [
-                    { section: { department: { instituteId } } },
-                    { courseOffering: { course: { department: { instituteId } } } },
-                    { courseOffering: { subject: { department: { instituteId } } } },
-                    { faculty: { department: { instituteId } } },
-                  ],
-                }
-              : undefined,
-            include: entryInclude,
-          },
-          conflicts: true,
-        },
-      }) as any;
-    }
-
+    if (this.access?.restricted) return { ...tt, metadata: null, conflicts: [] };
     return tt;
   }
 
-  async create(data: { name: string; academicYearId: string; semesterId: string; departmentId?: string | null; createdById?: string }) {
-    return prisma.timetable.create({
+  async create(data: {
+    name: string;
+    academicYearId: string;
+    semesterId: string;
+    departmentId?: string | null;
+    createdById?: string;
+    instituteId: string;
+  }) {
+    this.access?.assertManager();
+    const semester = await this.db.semester.findUnique({ where: { id: data.semesterId } });
+    if (!semester || semester.academicYearId !== data.academicYearId)
+      throw new ValidationError('Semester must belong to the academic year');
+    return this.db.timetable.create({
       data: { ...data, status: TimetableStatus.DRAFT },
     });
   }
 
-  async update(id: string, data: Partial<{ name: string; status: TimetableStatus }>) {
-    await this.getById(id);
-    return prisma.timetable.update({
-      where: { id },
-      data,
-    });
+  private instituteScope() {
+    return this.access?.user.instituteId ?? undefined;
   }
 
-  async publish(id: string) {
+  async update(...args: Parameters<TimetableService['updateWithin']>) {
+    return withScheduleWrite(
+      (db) => new TimetableService(db, this.access).updateWithin(...args),
+      this.instituteScope()
+    );
+  }
+
+  private async updateWithin(id: string, data: Partial<{ name: string; status: TimetableStatus }>) {
+    if (this.access) await this.access.assertTimetable(id, true, this.db);
+    if (data.status === TimetableStatus.PUBLISHED) {
+      await this.publishWithin(id);
+    }
     await this.getById(id);
-    return prisma.timetable.update({
+    const updated = await this.db.timetable.update({
+      where: { id },
+      data: {
+        name: data.name,
+        status: data.status,
+        ...(data.status && data.status !== TimetableStatus.PUBLISHED ? { publishedAt: null } : {}),
+      },
+    });
+    if (data.status === TimetableStatus.GENERATED) {
+      const timetable = await this.getById(id);
+      for (const entry of timetable.entries) await validateEntryInstitute(entry, this.db);
+      await this.assertNoConflicts(id);
+    }
+    return updated;
+  }
+
+  async publish(...args: Parameters<TimetableService['publishWithin']>) {
+    return withScheduleWrite(
+      (db) => new TimetableService(db, this.access).publishWithin(...args),
+      this.instituteScope()
+    );
+  }
+
+  private async publishWithin(id: string) {
+    if (this.access) await this.access.assertTimetable(id, true, this.db);
+    const timetable = await this.getById(id);
+    if (timetable.status !== TimetableStatus.GENERATED)
+      throw new ConflictError('Only a generated timetable can be published');
+    if (!timetable.entries.length) {
+      throw new ConflictError('Schedule all missing sessions before publishing');
+    }
+    const fullScope = await this.db.timetable.findUniqueOrThrow({ where: { id } });
+    await assertTeachingComplete(this.db, fullScope);
+    await this.assertNoConflicts(id);
+    for (const entry of timetable.entries) {
+      await validateEntryInstitute(entry, this.db);
+    }
+    return this.db.timetable.update({
       where: { id },
       data: { status: TimetableStatus.PUBLISHED, publishedAt: new Date() },
     });
   }
 
-  async remove(id: string) {
+  async unpublish(...args: Parameters<TimetableService['unpublishWithin']>) {
+    return withScheduleWrite(
+      (db) => new TimetableService(db, this.access).unpublishWithin(...args),
+      this.instituteScope()
+    );
+  }
+
+  private async unpublishWithin(id: string) {
+    if (this.access) await this.access.assertTimetable(id, true, this.db);
     await this.getById(id);
-    await prisma.timetable.delete({ where: { id } });
+    const result = await this.db.timetable.updateMany({
+      where: { id, status: TimetableStatus.PUBLISHED },
+      data: { status: TimetableStatus.GENERATED, publishedAt: null },
+    });
+    if (result.count === 0) {
+      throw new ConflictError('Only a published timetable can be unpublished');
+    }
+    return this.getById(id);
+  }
+
+  async remove(...args: Parameters<TimetableService['removeWithin']>) {
+    return withScheduleWrite(
+      (db) => new TimetableService(db, this.access).removeWithin(...args),
+      this.instituteScope()
+    );
+  }
+
+  private async removeWithin(id: string) {
+    if (this.access) await this.access.assertTimetable(id, true, this.db);
+    await this.getById(id);
+    await this.db.timetable.delete({ where: { id } });
     return { message: 'Timetable deleted' };
   }
 
   async getEntries(timetableId: string) {
     await this.getById(timetableId);
-    return prisma.timetableEntry.findMany({
-      where: { timetableId },
+    return this.db.timetableEntry.findMany({
+      where: {
+        timetableId,
+        timetable: this.access?.timetableWhere,
+        AND: [this.access?.entryWhere || {}],
+      },
       include: entryInclude,
       orderBy: [{ day: { order: 'asc' } }, { timeSlot: { order: 'asc' } }],
     });
   }
 
-  async addEntry(timetableId: string, data: {
-    courseOfferingId: string;
-    facultyId: string;
-    roomId?: string | null;
-    laboratoryId?: string | null;
-    sectionId?: string | null;
-    dayId: string;
-    timeSlotId: string;
-    isLab?: boolean;
-    isLocked?: boolean;
-    notes?: string;
-  }) {
-    await this.getById(timetableId);
-    const entry = await prisma.timetableEntry.create({
+  async addEntry(...args: Parameters<TimetableService['addEntryWithin']>) {
+    return withScheduleWrite(
+      (db) => new TimetableService(db, this.access).addEntryWithin(...args),
+      this.instituteScope()
+    );
+  }
+
+  private async addEntryWithin(
+    timetableId: string,
+    data: {
+      courseOfferingId: string;
+      facultyId: string;
+      roomId?: string | null;
+      laboratoryId?: string | null;
+      sectionId?: string | null;
+      dayId: string;
+      timeSlotId: string;
+      isLab?: boolean;
+      isLocked?: boolean;
+      notes?: string;
+    }
+  ) {
+    await this.assertEditable(timetableId);
+    const offering = await this.db.courseOffering.findUniqueOrThrow({
+      where: { id: data.courseOfferingId },
+      include: { subject: true },
+    });
+    if (this.sessionLength(offering.subject) > 1)
+      throw new ConflictError('Use the whole-session endpoint for multi-period teaching');
+    await validateEntryInstitute({ timetableId, ...data }, this.db);
+    const entry = await this.db.timetableEntry.create({
       data: { timetableId, ...data },
       include: entryInclude,
     });
-    await conflictService.detectAndPersist(timetableId);
+    await this.assertNoConflicts(timetableId);
     return entry;
   }
 
-  async updateEntry(entryId: string, data: Partial<{
-    dayId: string;
-    timeSlotId: string;
-    roomId: string | null;
-    laboratoryId: string | null;
-    facultyId: string;
-    isLocked: boolean;
-    notes: string;
-  }>) {
-    const entry = await prisma.timetableEntry.findUnique({ where: { id: entryId } });
+  async updateEntry(...args: Parameters<TimetableService['updateEntryWithin']>) {
+    return withScheduleWrite(
+      (db) => new TimetableService(db, this.access).updateEntryWithin(...args),
+      this.instituteScope()
+    );
+  }
+
+  private async updateEntryWithin(
+    entryId: string,
+    data: Partial<{
+      dayId: string;
+      timeSlotId: string;
+      roomId: string | null;
+      laboratoryId: string | null;
+      facultyId: string;
+      isLocked: boolean;
+      notes: string;
+    }>
+  ) {
+    if (this.access) await this.access.assertEntry(entryId, true, this.db);
+    const entry = await this.db.timetableEntry.findUnique({ where: { id: entryId } });
     if (!entry) throw new NotFoundError('Timetable entry');
-    if (entry.isLocked && (data.dayId || data.timeSlotId || data.roomId || data.facultyId)) {
+    if (
+      entry.sessionId &&
+      (await this.db.timetableEntry.count({
+        where: { timetableId: entry.timetableId, sessionId: entry.sessionId },
+      })) > 1
+    )
+      throw new ConflictError('Use the whole-session editor for multi-period teaching');
+    await this.assertEditable(entry.timetableId);
+    if (
+      entry.isLocked &&
+      [
+        'dayId',
+        'timeSlotId',
+        'roomId',
+        'laboratoryId',
+        'facultyId',
+        'sectionId',
+        'courseOfferingId',
+      ].some((key) => key in data)
+    ) {
       throw new ConflictError('Entry is locked');
     }
 
-    // If moving a lab entry to a new day or slot, delete any duplicate lab entries for the same offering & batch from the old day
-    if ((entry.isLab || entry.practicalBatchId) && data.dayId && data.dayId !== entry.dayId) {
-      await prisma.timetableEntry.deleteMany({
-        where: {
-          timetableId: entry.timetableId,
-          courseOfferingId: entry.courseOfferingId,
-          practicalBatchId: entry.practicalBatchId,
-          dayId: entry.dayId,
-          id: { not: entryId },
-        },
-      });
-    }
+    await validateEntryInstitute({ ...entry, ...data }, this.db);
 
-    const updated = await prisma.timetableEntry.update({
+    const updated = await this.db.timetableEntry.update({
       where: { id: entryId },
       data,
       include: entryInclude,
     });
-    await conflictService.detectAndPersist(entry.timetableId);
+    await this.assertNoConflicts(entry.timetableId);
     return updated;
   }
 
-  async deleteEntry(entryId: string) {
-    const entry = await prisma.timetableEntry.findUnique({ where: { id: entryId } });
+  async deleteEntry(...args: Parameters<TimetableService['deleteEntryWithin']>) {
+    return withScheduleWrite(
+      (db) => new TimetableService(db, this.access).deleteEntryWithin(...args),
+      this.instituteScope()
+    );
+  }
+
+  private async deleteEntryWithin(entryId: string) {
+    if (this.access) await this.access.assertEntry(entryId, true, this.db);
+    const entry = await this.db.timetableEntry.findUnique({ where: { id: entryId } });
     if (!entry) throw new NotFoundError('Timetable entry');
+    if (
+      entry.sessionId &&
+      (await this.db.timetableEntry.count({
+        where: { timetableId: entry.timetableId, sessionId: entry.sessionId },
+      })) > 1
+    )
+      throw new ConflictError('Use the whole-session editor for multi-period teaching');
+    await this.assertEditable(entry.timetableId);
     if (entry.isLocked) throw new ConflictError('Entry is locked');
-    await prisma.timetableEntry.delete({ where: { id: entryId } });
-    await conflictService.detectAndPersist(entry.timetableId);
+    await this.db.timetableEntry.delete({ where: { id: entryId } });
+    await this.assertNoConflicts(entry.timetableId);
     return { message: 'Entry deleted' };
   }
 
-  async viewByFaculty(facultyId: string, semesterId?: string) {
-    return prisma.timetableEntry.findMany({
-      where: {
-        facultyId,
-        timetable: {
-          status: { in: [TimetableStatus.PUBLISHED, TimetableStatus.GENERATED] },
-          ...(semesterId ? { semesterId } : {}),
-        },
-      },
-      include: entryInclude,
-      orderBy: [{ day: { order: 'asc' } }, { timeSlot: { order: 'asc' } }],
-    });
+  private sessionLength(subject: { type: string; labHours: number; weeklyHours: number }) {
+    if (subject.type === 'LAB') return Math.max(2, subject.labHours || 2);
+    if (subject.type === 'PRACTICAL') return subject.weeklyHours === 1 ? 1 : 2;
+    return 1;
   }
 
-  async viewBySection(sectionId: string, semesterId?: string) {
-    return prisma.timetableEntry.findMany({
-      where: {
-        sectionId,
-        timetable: {
-          status: { in: [TimetableStatus.PUBLISHED, TimetableStatus.GENERATED] },
-          ...(semesterId ? { semesterId } : {}),
-        },
-      },
-      include: entryInclude,
-      orderBy: [{ day: { order: 'asc' } }, { timeSlot: { order: 'asc' } }],
+  private async sessionSlots(startId: string, length: number, instituteId: string) {
+    const slots = await this.db.timeSlot.findMany({
+      where: { isActive: true, OR: [{ instituteId: null }, { instituteId }] },
+      orderBy: { startTime: 'asc' },
     });
+    const index = slots.findIndex((slot) => slot.id === startId);
+    const selected = index < 0 ? [] : slots.slice(index, index + length);
+    if (
+      selected.length !== length ||
+      selected.some(
+        (slot, i) => slot.isLunchBreak || (i > 0 && slots[index + i - 1].endTime !== slot.startTime)
+      )
+    )
+      throw new ConflictError('Choose consecutive teaching periods without a break');
+    return selected;
   }
 
-  async viewByRoom(roomId: string, semesterId?: string) {
-    return prisma.timetableEntry.findMany({
-      where: {
-        roomId,
-        timetable: {
-          status: { in: [TimetableStatus.PUBLISHED, TimetableStatus.GENERATED] },
-          ...(semesterId ? { semesterId } : {}),
-        },
-      },
-      include: entryInclude,
-      orderBy: [{ day: { order: 'asc' } }, { timeSlot: { order: 'asc' } }],
-    });
+  async createSession(
+    timetableId: string,
+    data: {
+      courseOfferingId: string;
+      facultyId: string;
+      sectionId: string;
+      practicalBatchId?: string | null;
+      dayId: string;
+      startTimeSlotId: string;
+      roomId?: string | null;
+      laboratoryId?: string | null;
+      notes?: string;
+    }
+  ) {
+    return withScheduleWrite(async (db) => {
+      const service = new TimetableService(db, this.access);
+      const timetable = await service.assertEditable(timetableId);
+      const offering = await db.courseOffering.findUniqueOrThrow({
+        where: { id: data.courseOfferingId },
+        include: { subject: true },
+      });
+      const slots = await service.sessionSlots(
+        data.startTimeSlotId,
+        service.sessionLength(offering.subject),
+        timetable.instituteId
+      );
+      const { startTimeSlotId, ...fields } = data;
+      const sessionId = randomUUID();
+      for (const slot of slots) {
+        const entry = {
+          ...fields,
+          timetableId,
+          sessionId,
+          timeSlotId: slot.id,
+          isLab: offering.subject.type === 'LAB',
+        };
+        await validateEntryInstitute(entry, db);
+        await db.timetableEntry.create({ data: entry });
+      }
+      await service.assertNoConflicts(timetableId);
+      return db.timetableEntry.findMany({
+        where: { timetableId, sessionId },
+        include: entryInclude,
+      });
+    }, this.instituteScope());
   }
 
-  async viewByDepartment(departmentId: string, semesterId?: string) {
-    return prisma.timetableEntry.findMany({
+  async updateSession(
+    timetableId: string,
+    sessionId: string,
+    data: {
+      dayId?: string;
+      startTimeSlotId?: string;
+      facultyId?: string;
+      roomId?: string | null;
+      laboratoryId?: string | null;
+      isLocked?: boolean;
+      notes?: string;
+    }
+  ) {
+    return withScheduleWrite(async (db) => {
+      const service = new TimetableService(db, this.access);
+      const timetable = await service.assertEditable(timetableId);
+      const entries = await db.timetableEntry.findMany({
+        where: { timetableId, sessionId },
+        include: entryInclude,
+        orderBy: { timeSlot: { startTime: 'asc' } },
+      });
+      if (!entries.length) throw new NotFoundError('Teaching session');
+      if (
+        entries.some((e) => e.isLocked) &&
+        Object.keys(data).some((key) => key !== 'isLocked' && key !== 'notes')
+      )
+        throw new ConflictError('Unlock the whole session before moving it');
+      if (entries.length !== service.sessionLength(entries[0].courseOffering.subject))
+        throw new ConflictError('The saved session is incomplete and needs repair');
+      const slots = await service.sessionSlots(
+        data.startTimeSlotId || entries[0].timeSlotId,
+        entries.length,
+        timetable.instituteId
+      );
+      const { startTimeSlotId, ...fields } = data;
+      for (let i = 0; i < entries.length; i++) {
+        await validateEntryInstitute({ ...entries[i], ...fields, timeSlotId: slots[i].id }, db);
+        await db.timetableEntry.update({
+          where: { id: entries[i].id },
+          data: { ...fields, timeSlotId: slots[i].id },
+        });
+      }
+      await service.assertNoConflicts(timetableId);
+      return db.timetableEntry.findMany({
+        where: { timetableId, sessionId },
+        include: entryInclude,
+      });
+    }, this.instituteScope());
+  }
+
+  async deleteSession(timetableId: string, sessionId: string) {
+    return withScheduleWrite(async (db) => {
+      const service = new TimetableService(db, this.access);
+      await service.assertEditable(timetableId);
+      const entries = await db.timetableEntry.findMany({ where: { timetableId, sessionId } });
+      if (!entries.length) throw new NotFoundError('Teaching session');
+      if (entries.some((e) => e.isLocked))
+        throw new ConflictError('Unlock the whole session before deleting it');
+      await db.timetableEntry.deleteMany({ where: { timetableId, sessionId } });
+      await new ConflictService(db).detectAndPersist(timetableId);
+      return { message: 'Whole teaching session deleted', deletedPeriods: entries.length };
+    }, this.instituteScope());
+  }
+
+  async occurrences(id: string, requestedWeek?: string) {
+    const timetable = await this.getById(id);
+    const { week, entries } = await datedWeekOccurrences(
+      this.db,
+      timetable.instituteId,
+      timetable.semester,
+      timetable.entries,
+      requestedWeek,
+      () => timetable
+    );
+    return {
+      week,
+      semesterStart: dateKey(timetable.semester.startDate),
+      semesterEnd: dateKey(timetable.semester.endDate),
+      entries,
+    };
+  }
+
+  async view(kind: 'faculty' | 'section' | 'room' | 'department', id: string, semesterId?: string) {
+    if (this.access) await this.access.assertResource(kind, id, this.db);
+    const resourceWhere: Prisma.TimetableEntryWhereInput =
+      kind === 'department' ? { section: { departmentId: id } } : { [kind + 'Id']: id };
+    return this.db.timetableEntry.findMany({
       where: {
+        AND: [resourceWhere, this.access?.entryWhere || {}],
         timetable: {
-          departmentId,
-          status: { in: [TimetableStatus.PUBLISHED, TimetableStatus.GENERATED] },
-          ...(semesterId ? { semesterId } : {}),
+          AND: [
+            this.access?.timetableWhere || {},
+            { status: { in: ['PUBLISHED', 'GENERATED'] }, ...(semesterId ? { semesterId } : {}) },
+          ],
         },
       },
       include: entryInclude,

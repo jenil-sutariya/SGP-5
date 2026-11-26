@@ -1,3 +1,6 @@
+import { z } from 'zod';
+import { assertInstituteAccess } from '../../utils/instituteScope';
+import { ForbiddenError, NotFoundError } from '../../utils/AppError';
 import { Router } from 'express';
 import { RoleName } from '@prisma/client';
 import { Response } from 'express';
@@ -39,7 +42,6 @@ courseRouter.get(
     return ApiResponse.success(res, await courseService.listOfferings(instituteId));
   })
 );
-
 
 courseRouter.get(
   '/:id/subjects',
@@ -114,7 +116,11 @@ academicYearRouter.patch(
   authorize(RoleName.ADMIN),
   validate(academicYearSchema.partial()),
   asyncHandler(async (req, res) =>
-    ApiResponse.success(res, await academicService.updateYear(String(req.params.id), req.body), 'Updated')
+    ApiResponse.success(
+      res,
+      await academicService.updateYear(String(req.params.id), req.body),
+      'Updated'
+    )
   )
 );
 
@@ -154,7 +160,11 @@ semesterRouter.patch(
   authorize(RoleName.ADMIN),
   validate(semesterSchema.partial()),
   asyncHandler(async (req, res) =>
-    ApiResponse.success(res, await academicService.updateSemester(String(req.params.id), req.body), 'Updated')
+    ApiResponse.success(
+      res,
+      await academicService.updateSemester(String(req.params.id), req.body),
+      'Updated'
+    )
   )
 );
 
@@ -170,22 +180,82 @@ semesterRouter.delete(
 
 export const metaRouter = Router();
 metaRouter.use(authenticate);
-metaRouter.get('/days',       asyncHandler(async (req: AuthRequest, res) => {
-  const instituteId = resolveInstituteScope(req.user, req.query.instituteId as string);
-  return ApiResponse.success(res, await academicService.listDays(instituteId));
-}));
-metaRouter.get('/time-slots', asyncHandler(async (req: AuthRequest, res) => {
-  const instituteId = resolveInstituteScope(req.user, req.query.instituteId as string);
-  return ApiResponse.success(res, await academicService.listTimeSlots(instituteId));
-}));
-metaRouter.get('/programs',   asyncHandler(async (req: AuthRequest, res) => {
-  const instituteId = resolveInstituteScope(req.user, req.query.instituteId as string);
-  const result = await prisma.program.findMany({
-    where: {
-      isActive: true,
-      ...(instituteId ? { department: { instituteId } } : {}),
-    },
-    orderBy: { name: 'asc' },
-  });
-  return ApiResponse.success(res, result);
-}));
+metaRouter.get(
+  '/days',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const instituteId = resolveInstituteScope(req.user, req.query.instituteId as string);
+    return ApiResponse.success(res, await academicService.listDays(instituteId));
+  })
+);
+metaRouter.get(
+  '/time-slots',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const instituteId = resolveInstituteScope(req.user, req.query.instituteId as string);
+    return ApiResponse.success(res, await academicService.listTimeSlots(instituteId));
+  })
+);
+metaRouter.get(
+  '/programs',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const instituteId = resolveInstituteScope(req.user, req.query.instituteId as string);
+    const result = await prisma.program.findMany({
+      where: {
+        isActive: true,
+        ...(instituteId ? { department: { instituteId } } : {}),
+      },
+      orderBy: { name: 'asc' },
+    });
+    return ApiResponse.success(res, result);
+  })
+);
+
+const holidaySchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    date: z.coerce.date(),
+    academicYearId: z.string().min(1),
+    instituteId: z.string().min(1).nullable().optional(),
+    isRecurring: z.boolean().optional(),
+    description: z.string().optional(),
+  })
+  .strict();
+metaRouter.get(
+  '/holidays',
+  asyncHandler(async (req: AuthRequest, res) => {
+    const instituteId = resolveInstituteScope(req.user, req.query.instituteId as string);
+    return ApiResponse.success(
+      res,
+      await prisma.holiday.findMany({
+        where: instituteId ? { OR: [{ instituteId }, { instituteId: null }] } : {},
+        orderBy: { date: 'asc' },
+      })
+    );
+  })
+);
+metaRouter.post(
+  '/holidays',
+  authorize(RoleName.ADMIN, RoleName.INSTITUTE_ADMIN),
+  validate(holidaySchema),
+  asyncHandler(async (req: AuthRequest, res) => {
+    const instituteId = resolveInstituteScope(req.user, req.body.instituteId);
+    return ApiResponse.created(
+      res,
+      await prisma.holiday.create({ data: { ...req.body, instituteId: instituteId || null } })
+    );
+  })
+);
+metaRouter.delete(
+  '/holidays/:id',
+  authorize(RoleName.ADMIN, RoleName.INSTITUTE_ADMIN),
+  asyncHandler(async (req: AuthRequest, res) => {
+    const holiday = await prisma.holiday.findUnique({ where: { id: String(req.params.id) } });
+    if (!holiday) throw new NotFoundError('Holiday');
+    if (!holiday.instituteId && req.user!.role !== 'ADMIN')
+      throw new ForbiddenError('Only a global administrator can change a shared holiday');
+    assertInstituteAccess(req.user, holiday.instituteId);
+    await prisma.holiday.delete({ where: { id: holiday.id } });
+    return ApiResponse.success(res, {
+      message: 'Holiday removed; teaching occurrences restored where valid',
+    });
+  })
+);

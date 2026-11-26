@@ -1,3 +1,4 @@
+import { venueSatisfies } from './venue.rules';
 import {
   EngineContext,
   EngineResult,
@@ -25,6 +26,7 @@ export class SchedulingEngine {
 
   run(ctx: EngineContext): EngineResult {
     this.reset();
+    this.seedBookings(ctx);
     const sorted = [...ctx.requests].sort((a, b) => b.priority - a.priority);
     const assignments: ScheduledAssignment[] = [];
     const unassigned: SessionRequest[] = [];
@@ -54,9 +56,9 @@ export class SchedulingEngine {
       }
 
       const batches = Array.from(batchMap.keys()).sort();
-      const lists = batches.map(b => batchMap.get(b)!);
-      
-      const maxLen = Math.max(...lists.map(l => l.length));
+      const lists = batches.map((b) => batchMap.get(b)!);
+
+      const maxLen = Math.max(...lists.map((l) => l.length));
       const sectionGroups: SessionRequest[][] = [];
 
       for (let i = 0; i < maxLen; i++) {
@@ -64,7 +66,7 @@ export class SchedulingEngine {
         for (let bIdx = 0; bIdx < lists.length; bIdx++) {
           const list = lists[bIdx];
           const reqIdx = (i + bIdx) % list.length;
-          const req = list[reqIdx];
+          const req = i < list.length ? list[reqIdx] : undefined;
           if (req) {
             group.push(req);
           }
@@ -91,9 +93,13 @@ export class SchedulingEngine {
 
       if (request.isLab && request.sectionId) {
         const sectionGroups = labGroupsBySection.get(request.sectionId) || [];
-        const group = sectionGroups.find(g => g.some(r => r.id === request.id));
+        const group = sectionGroups
+          .find((g) => g.some((r) => r.id === request.id))
+          ?.filter(
+            (r) => !scheduledRequestIds.has(r.id) && r.consecutiveSlots === request.consecutiveSlots
+          );
 
-        if (group) {
+        if (group?.length) {
           for (const r of group) {
             scheduledRequestIds.add(r.id);
           }
@@ -104,8 +110,11 @@ export class SchedulingEngine {
               assignments.push(a);
             }
           } else {
+            // If batches cannot run in parallel, schedule them separately without dropping sessions.
             for (const r of group) {
-              unassigned.push(r);
+              const candidates = this.findCandidates(r, ctx);
+              if (candidates.length) assignments.push(this.commit(r, candidates[0], ctx));
+              else unassigned.push(r);
             }
           }
           continue;
@@ -133,21 +142,34 @@ export class SchedulingEngine {
     return { assignments, unassigned, score, iterations };
   }
 
-  private findGroupCandidate(group: SessionRequest[], ctx: EngineContext): ScheduledAssignment[] | null {
+  private findGroupCandidate(
+    group: SessionRequest[],
+    ctx: EngineContext
+  ): ScheduledAssignment[] | null {
     const teachingSlots = ctx.timeSlots.filter((s) => !s.isLunchBreak);
     const slotsNeeded = group[0].consecutiveSlots;
 
-    const candidates: { dayId: string; startSlotId: string; assignments: ScheduledAssignment[]; score: number }[] = [];
+    const candidates: {
+      dayId: string;
+      startSlotId: string;
+      assignments: ScheduledAssignment[];
+      score: number;
+    }[] = [];
 
     for (const day of ctx.workingDays) {
       for (let i = 0; i < teachingSlots.length; i++) {
         if (i + slotsNeeded > teachingSlots.length) continue;
 
         const slotGroup = teachingSlots.slice(i, i + slotsNeeded);
-        
+
         let consecutive = true;
         for (let j = 1; j < slotGroup.length; j++) {
-          if (slotGroup[j].order !== slotGroup[j - 1].order + 1) {
+          if (
+            slotGroup[j].order !== slotGroup[j - 1].order + 1 ||
+            (slotGroup[j].startTime &&
+              slotGroup[j - 1].endTime &&
+              slotGroup[j].startTime !== slotGroup[j - 1].endTime)
+          ) {
             consecutive = false;
             break;
           }
@@ -158,11 +180,19 @@ export class SchedulingEngine {
         const LAB_PAIR_STARTS = [1, 4, 7];
         if (!LAB_PAIR_STARTS.includes(slotGroup[0].order)) continue;
 
-        const groupAssignments = this.tryPlaceGroupInSlot(group, day.id, slotGroup.map((s) => s.id), ctx);
+        const groupAssignments = this.tryPlaceGroupInSlot(
+          group,
+          day.id,
+          slotGroup.map((s) => s.id),
+          ctx
+        );
         if (groupAssignments) {
           const totalScore = groupAssignments.reduce((sum, a) => {
             const req = group.find((r) => r.id === a.requestId)!;
-            return sum + this.scoreCandidate(req, day.id, slotGroup[0].id, a.laboratoryId, undefined, ctx);
+            return (
+              sum +
+              this.scoreCandidate(req, day.id, slotGroup[0].id, a.laboratoryId, undefined, ctx)
+            );
           }, 0);
 
           candidates.push({
@@ -196,22 +226,25 @@ export class SchedulingEngine {
         if (a.practicalBatchId) {
           this.batchOcc.add(occKey(best.dayId, slotId, a.practicalBatchId));
         }
-        if (a.sectionId) {
+        if (a.sectionId && !a.practicalBatchId) {
           this.sectionTheoryOcc.add(occKey(best.dayId, slotId, a.sectionId));
         }
       }
-      
+
       if (a.laboratoryId) {
-        this.labAssignmentsCount.set(a.laboratoryId, (this.labAssignmentsCount.get(a.laboratoryId) ?? 0) + 1);
+        this.labAssignmentsCount.set(
+          a.laboratoryId,
+          (this.labAssignmentsCount.get(a.laboratoryId) ?? 0) + 1
+        );
       }
 
       const dayKey = `${a.facultyId}|${best.dayId}`;
       const currentDay = this.facultyDayCount.get(dayKey) ?? 0;
-      this.facultyDayCount.set(dayKey, currentDay + a.timeSlotIds.length);
+      this.facultyDayCount.set(dayKey, currentDay + this.hours(a.timeSlotIds, ctx));
 
       const weekKey = a.facultyId;
       const currentWeek = this.facultyWeekCount.get(weekKey) ?? 0;
-      this.facultyWeekCount.set(weekKey, currentWeek + a.timeSlotIds.length);
+      this.facultyWeekCount.set(weekKey, currentWeek + this.hours(a.timeSlotIds, ctx));
     }
 
     return best.assignments;
@@ -248,39 +281,74 @@ export class SchedulingEngine {
 
       // Faculty availability & limits
       if (usedFaculty.has(req.facultyId)) return false;
+      if (
+        ctx.facultyTeachingDays?.has(req.facultyId) &&
+        !ctx.facultyTeachingDays.get(req.facultyId)!.has(dayId)
+      )
+        return false;
 
       const dayKey = `${req.facultyId}|${dayId}`;
       const dayCount = this.facultyDayCount.get(dayKey) ?? 0;
       const maxDay = ctx.facultyMaxPerDay.get(req.facultyId) ?? 4;
-      if (dayCount + slotIds.length > maxDay) return false;
+      if (dayCount + this.hours(slotIds, ctx) > maxDay) return false;
 
       const weekCount = this.facultyWeekCount.get(req.facultyId) ?? 0;
       const maxWeek = ctx.facultyMaxPerWeek.get(req.facultyId) ?? 16;
-      if (weekCount + slotIds.length > maxWeek) return false;
+      if (weekCount + this.hours(slotIds, ctx) > maxWeek) return false;
 
       for (const slotId of slotIds) {
         const availKey = `${dayId}|${slotId}`;
         const avail = ctx.facultyAvailability.get(req.facultyId);
-        if (avail && avail.size > 0 && !avail.has(availKey)) return false;
+        if (avail && !avail.has(availKey)) return false;
+        if (this.isUnavailable(req.facultyId, dayId, slotId, ctx)) return false;
         if (this.facultyOcc.has(occKey(dayId, slotId, req.facultyId))) return false;
       }
 
       // Find a laboratory or classroom for this request strictly by subjectType
-      const targetLabs = sortedLabs.map((l) => ({ id: l.id, capacity: l.capacity, departmentId: l.departmentId, isRoom: false }));
-      const targetRooms = ctx.rooms.map((r) => ({ id: r.id, capacity: r.capacity, departmentId: r.departmentId, isRoom: true }));
+      const targetLabs = sortedLabs.map((l) => ({
+        ...l,
+        capacity: l.capacity,
+        departmentId: l.departmentId,
+        instituteId: l.instituteId,
+        isRoom: false,
+      }));
+      const targetRooms = ctx.rooms.map((r) => ({
+        ...r,
+        capacity: r.capacity,
+        departmentId: r.departmentId,
+        instituteId: r.instituteId,
+        isRoom: true,
+      }));
       const venues = req.subjectType === 'LAB' ? targetLabs : targetRooms;
 
       for (const venue of venues) {
-        if (venue.capacity < req.requiredCapacity) continue;
-        if (venue.departmentId && req.departmentId && !this.canShareResources(req.departmentId, venue.departmentId, ctx.departmentCodes, ctx.departmentInstitutes)) continue;
+        if (
+          !venue.instituteId ||
+          venue.instituteId !== ctx.departmentInstitutes?.get(req.departmentId)
+        )
+          continue;
+        if (!venueSatisfies(venue, req.requiredCapacity, req.venueRequirements)) continue;
+        if (
+          venue.departmentId &&
+          req.departmentId &&
+          !this.canShareResources(
+            req.departmentId,
+            venue.departmentId,
+            ctx.departmentCodes,
+            ctx.departmentInstitutes
+          )
+        )
+          continue;
 
         let venueFree = true;
         for (const slotId of slotIds) {
           const currentOccupied = venue.isRoom
-            ? (this.roomOcc.has(occKey(dayId, slotId, venue.id)) ? 9999 : 0)
+            ? this.roomOcc.has(occKey(dayId, slotId, venue.id))
+              ? 9999
+              : 0
             : (this.labOccupancyMap.get(occKey(dayId, slotId, venue.id)) ?? 0);
           const insideGroupOccupied = usedLabs.get(venue.id) ?? 0;
-          if (currentOccupied + insideGroupOccupied + req.requiredCapacity > venue.capacity) {
+          if (currentOccupied > 0 || insideGroupOccupied > 0) {
             venueFree = false;
             break;
           }
@@ -289,7 +357,10 @@ export class SchedulingEngine {
 
         let batchFree = true;
         for (const slotId of slotIds) {
-          if (req.practicalBatchId && this.batchOcc.has(occKey(dayId, slotId, req.practicalBatchId))) {
+          if (
+            req.practicalBatchId &&
+            this.batchOcc.has(occKey(dayId, slotId, req.practicalBatchId))
+          ) {
             batchFree = false;
             break;
           }
@@ -300,12 +371,7 @@ export class SchedulingEngine {
         usedFaculty.add(req.facultyId);
         const insideGroupOccupied = usedLabs.get(venue.id) ?? 0;
         usedLabs.set(venue.id, insideGroupOccupied + req.requiredCapacity);
-        if (venue.isRoom) {
-          for (const slotId of slotIds) {
-            this.roomOcc.add(occKey(dayId, slotId, venue.id));
-          }
-        }
-        
+
         assignments.push({
           requestId: req.id,
           courseOfferingId: req.courseOfferingId,
@@ -323,11 +389,7 @@ export class SchedulingEngine {
 
         // Backtrack
         assignments.pop();
-        if (venue.isRoom) {
-          for (const slotId of slotIds) {
-            this.roomOcc.delete(occKey(dayId, slotId, venue.id));
-          }
-        }
+
         usedLabs.set(venue.id, insideGroupOccupied);
         usedFaculty.delete(req.facultyId);
       }
@@ -339,6 +401,52 @@ export class SchedulingEngine {
       return assignments;
     }
     return null;
+  }
+
+  private hours(slotIds: string[], ctx: EngineContext) {
+    return slotIds.reduce(
+      (sum, id) => sum + (ctx.timeSlots.find((s) => s.id === id)?.durationMins ?? 60) / 60,
+      0
+    );
+  }
+
+  private isUnavailable(facultyId: string, dayId: string, slotId: string, ctx: EngineContext) {
+    return (ctx.facultyPreferences.get(facultyId) ?? []).some(
+      (p) =>
+        p.type === 'UNAVAILABLE' &&
+        [dayId + '|' + slotId, dayId + '|', '|' + slotId, '|'].includes(p.key)
+    );
+  }
+
+  private seedBookings(ctx: EngineContext) {
+    for (const entry of ctx.existingBookings ?? []) {
+      const key = (id: string) => occKey(entry.dayId, entry.timeSlotId, id);
+      this.facultyOcc.add(key(entry.facultyId));
+      if (entry.roomId) {
+        this.roomOcc.add(key(entry.roomId));
+        this.roomAssignmentsCount.set(
+          entry.roomId,
+          (this.roomAssignmentsCount.get(entry.roomId) ?? 0) + 1
+        );
+      }
+      if (entry.laboratoryId) {
+        this.labOccupancyMap.set(key(entry.laboratoryId), Number.MAX_SAFE_INTEGER);
+        this.labAssignmentsCount.set(
+          entry.laboratoryId,
+          (this.labAssignmentsCount.get(entry.laboratoryId) ?? 0) + 1
+        );
+      }
+      if (entry.practicalBatchId) this.batchOcc.add(key(entry.practicalBatchId));
+      else if (entry.sectionId) this.sectionTheoryOcc.add(key(entry.sectionId));
+    }
+    for (const load of ctx.existingFacultyLoad ?? []) {
+      const dayKey = load.facultyId + '|' + load.dayId;
+      this.facultyDayCount.set(dayKey, (this.facultyDayCount.get(dayKey) ?? 0) + load.hours);
+      this.facultyWeekCount.set(
+        load.facultyId,
+        (this.facultyWeekCount.get(load.facultyId) ?? 0) + load.hours
+      );
+    }
   }
 
   private reset() {
@@ -366,14 +474,27 @@ export class SchedulingEngine {
         // consecutive by order
         let consecutive = true;
         for (let j = 1; j < slotGroup.length; j++) {
-          if (slotGroup[j].order !== slotGroup[j - 1].order + 1) {
+          if (
+            slotGroup[j].order !== slotGroup[j - 1].order + 1 ||
+            (slotGroup[j].startTime &&
+              slotGroup[j - 1].endTime &&
+              slotGroup[j].startTime !== slotGroup[j - 1].endTime)
+          ) {
             consecutive = false;
             break;
           }
         }
         if (!consecutive) continue;
 
-        if (!this.canPlace(request, day.id, slotGroup.map((s) => s.id), ctx)) continue;
+        if (
+          !this.canPlace(
+            request,
+            day.id,
+            slotGroup.map((s) => s.id),
+            ctx
+          )
+        )
+          continue;
 
         // Labs must start at a valid pair-start slot (P1, P3, P5 — orders 1, 4, 7)
         // so they never span a break. The consecutive-order check already handles this,
@@ -390,12 +511,26 @@ export class SchedulingEngine {
             return utilA - utilB;
           });
           for (const lab of sortedLabs) {
-            if (lab.capacity < request.requiredCapacity) continue;
-            if (request.departmentId && !this.canShareResources(request.departmentId, lab.departmentId, ctx.departmentCodes, ctx.departmentInstitutes)) continue;
+            if (!venueSatisfies(lab, request.requiredCapacity, request.venueRequirements)) continue;
+            if (
+              !lab.instituteId ||
+              lab.instituteId !== ctx.departmentInstitutes?.get(request.departmentId)
+            )
+              continue;
+            if (
+              request.departmentId &&
+              !this.canShareResources(
+                request.departmentId,
+                lab.departmentId,
+                ctx.departmentCodes,
+                ctx.departmentInstitutes
+              )
+            )
+              continue;
             let free = true;
             for (const s of slotGroup) {
               const currentOccupied = this.labOccupancyMap.get(occKey(day.id, s.id, lab.id)) ?? 0;
-              if (currentOccupied + request.requiredCapacity > lab.capacity) {
+              if (currentOccupied > 0) {
                 free = false;
                 break;
               }
@@ -417,8 +552,23 @@ export class SchedulingEngine {
             return utilA - utilB;
           });
           for (const room of sortedRooms) {
-            if (room.capacity < request.requiredCapacity) continue;
-            if (request.departmentId && !this.canShareResources(request.departmentId, room.departmentId, ctx.departmentCodes, ctx.departmentInstitutes)) continue;
+            if (!venueSatisfies(room, request.requiredCapacity, request.venueRequirements))
+              continue;
+            if (
+              !room.instituteId ||
+              room.instituteId !== ctx.departmentInstitutes?.get(request.departmentId)
+            )
+              continue;
+            if (
+              request.departmentId &&
+              !this.canShareResources(
+                request.departmentId,
+                room.departmentId,
+                ctx.departmentCodes,
+                ctx.departmentInstitutes
+              )
+            )
+              continue;
             let free = true;
             for (const s of slotGroup) {
               if (this.roomOcc.has(occKey(day.id, s.id, room.id))) {
@@ -474,7 +624,9 @@ export class SchedulingEngine {
         return true;
       }
     }
-    return false;
+    return (ctx.existingBookings ?? []).some(
+      (e) => e.practicalBatchId === batchId && e.sectionId === sectionId
+    );
   }
 
   private canPlace(
@@ -483,20 +635,26 @@ export class SchedulingEngine {
     slotIds: string[],
     ctx: EngineContext
   ): boolean {
+    if (
+      ctx.facultyTeachingDays?.has(request.facultyId) &&
+      !ctx.facultyTeachingDays.get(request.facultyId)!.has(dayId)
+    )
+      return false;
     const dayKey = `${request.facultyId}|${dayId}`;
     const dayCount = this.facultyDayCount.get(dayKey) ?? 0;
     const maxDay = ctx.facultyMaxPerDay.get(request.facultyId) ?? 4;
-    if (dayCount + slotIds.length > maxDay) return false;
+    if (dayCount + this.hours(slotIds, ctx) > maxDay) return false;
 
     const weekCount = this.facultyWeekCount.get(request.facultyId) ?? 0;
     const maxWeek = ctx.facultyMaxPerWeek.get(request.facultyId) ?? 16;
-    if (weekCount + slotIds.length > maxWeek) return false;
+    if (weekCount + this.hours(slotIds, ctx) > maxWeek) return false;
 
     for (const slotId of slotIds) {
       const availKey = `${dayId}|${slotId}`;
       const avail = ctx.facultyAvailability.get(request.facultyId);
-      if (avail && avail.size > 0 && !avail.has(availKey)) return false;
+      if (avail && !avail.has(availKey)) return false;
 
+      if (this.isUnavailable(request.facultyId, dayId, slotId, ctx)) return false;
       if (this.facultyOcc.has(occKey(dayId, slotId, request.facultyId))) return false;
 
       if (request.sectionId) {
@@ -567,7 +725,11 @@ export class SchedulingEngine {
     return score;
   }
 
-  private commit(request: SessionRequest, candidate: SlotCandidate, ctx: EngineContext): ScheduledAssignment {
+  private commit(
+    request: SessionRequest,
+    candidate: SlotCandidate,
+    ctx: EngineContext
+  ): ScheduledAssignment {
     const teachingSlots = ctx.timeSlots.filter((s) => !s.isLunchBreak);
     const startIdx = teachingSlots.findIndex((s) => s.id === candidate.timeSlotId);
     const slotGroup = teachingSlots.slice(startIdx, startIdx + request.consecutiveSlots);
@@ -575,10 +737,13 @@ export class SchedulingEngine {
     for (const s of slotGroup) {
       this.facultyOcc.add(occKey(candidate.dayId, s.id, request.facultyId));
       if (candidate.roomId) this.roomOcc.add(occKey(candidate.dayId, s.id, candidate.roomId));
-      
+
       if (candidate.laboratoryId) {
         const key = occKey(candidate.dayId, s.id, candidate.laboratoryId);
-        this.labOccupancyMap.set(key, (this.labOccupancyMap.get(key) ?? 0) + request.requiredCapacity);
+        this.labOccupancyMap.set(
+          key,
+          (this.labOccupancyMap.get(key) ?? 0) + request.requiredCapacity
+        );
       }
 
       if (request.sectionId) {
@@ -591,17 +756,34 @@ export class SchedulingEngine {
     }
 
     if (candidate.roomId) {
-      this.roomAssignmentsCount.set(candidate.roomId, (this.roomAssignmentsCount.get(candidate.roomId) ?? 0) + 1);
+      this.roomAssignmentsCount.set(
+        candidate.roomId,
+        (this.roomAssignmentsCount.get(candidate.roomId) ?? 0) + 1
+      );
     }
     if (candidate.laboratoryId) {
-      this.labAssignmentsCount.set(candidate.laboratoryId, (this.labAssignmentsCount.get(candidate.laboratoryId) ?? 0) + 1);
+      this.labAssignmentsCount.set(
+        candidate.laboratoryId,
+        (this.labAssignmentsCount.get(candidate.laboratoryId) ?? 0) + 1
+      );
     }
 
     const dayKey = `${request.facultyId}|${candidate.dayId}`;
-    this.facultyDayCount.set(dayKey, (this.facultyDayCount.get(dayKey) ?? 0) + slotGroup.length);
+    this.facultyDayCount.set(
+      dayKey,
+      (this.facultyDayCount.get(dayKey) ?? 0) +
+        this.hours(
+          slotGroup.map((s) => s.id),
+          ctx
+        )
+    );
     this.facultyWeekCount.set(
       request.facultyId,
-      (this.facultyWeekCount.get(request.facultyId) ?? 0) + slotGroup.length
+      (this.facultyWeekCount.get(request.facultyId) ?? 0) +
+        this.hours(
+          slotGroup.map((s) => s.id),
+          ctx
+        )
     );
 
     return {
@@ -629,7 +811,7 @@ export class SchedulingEngine {
     for (let i = existing.length - 1; i >= 0; i--) {
       const victim = existing[i];
       const victimReq = ctx.requests.find((r) => r.id === victim.requestId);
-      if (!victimReq || victimReq.priority >= request.priority) continue;
+      if (!victimReq || victim.isLab || victimReq.priority >= request.priority) continue;
 
       this.uncommit(victim, ctx);
       existing.splice(i, 1);
@@ -643,27 +825,39 @@ export class SchedulingEngine {
           return assignment;
         }
         this.uncommit(assignment, ctx);
-        existing.push(this.commit(victimReq, {
-          dayId: victim.dayId,
-          timeSlotId: victim.timeSlotIds[0],
-          dayOrder: 0,
-          slotOrder: 0,
-          roomId: victim.roomId,
-          laboratoryId: victim.laboratoryId,
-          score: 0,
-        }, ctx));
+        existing.push(
+          this.commit(
+            victimReq,
+            {
+              dayId: victim.dayId,
+              timeSlotId: victim.timeSlotIds[0],
+              dayOrder: 0,
+              slotOrder: 0,
+              roomId: victim.roomId,
+              laboratoryId: victim.laboratoryId,
+              score: 0,
+            },
+            ctx
+          )
+        );
         continue;
       }
 
-      existing.push(this.commit(victimReq, {
-        dayId: victim.dayId,
-        timeSlotId: victim.timeSlotIds[0],
-        dayOrder: 0,
-        slotOrder: 0,
-        roomId: victim.roomId,
-        laboratoryId: victim.laboratoryId,
-        score: 0,
-      }, ctx));
+      existing.push(
+        this.commit(
+          victimReq,
+          {
+            dayId: victim.dayId,
+            timeSlotId: victim.timeSlotIds[0],
+            dayOrder: 0,
+            slotOrder: 0,
+            roomId: victim.roomId,
+            laboratoryId: victim.laboratoryId,
+            score: 0,
+          },
+          ctx
+        )
+      );
     }
     return null;
   }
@@ -674,8 +868,9 @@ export class SchedulingEngine {
 
     for (const slotId of assignment.timeSlotIds) {
       this.facultyOcc.delete(occKey(assignment.dayId, slotId, assignment.facultyId));
-      if (assignment.roomId) this.roomOcc.delete(occKey(assignment.dayId, slotId, assignment.roomId));
-      
+      if (assignment.roomId)
+        this.roomOcc.delete(occKey(assignment.dayId, slotId, assignment.roomId));
+
       if (assignment.laboratoryId) {
         const key = occKey(assignment.dayId, slotId, assignment.laboratoryId);
         const cur = this.labOccupancyMap.get(key) ?? 0;
@@ -706,11 +901,15 @@ export class SchedulingEngine {
     const dayKey = `${assignment.facultyId}|${assignment.dayId}`;
     this.facultyDayCount.set(
       dayKey,
-      Math.max(0, (this.facultyDayCount.get(dayKey) ?? 0) - assignment.timeSlotIds.length)
+      Math.max(0, (this.facultyDayCount.get(dayKey) ?? 0) - this.hours(assignment.timeSlotIds, ctx))
     );
     this.facultyWeekCount.set(
       assignment.facultyId,
-      Math.max(0, (this.facultyWeekCount.get(assignment.facultyId) ?? 0) - assignment.timeSlotIds.length)
+      Math.max(
+        0,
+        (this.facultyWeekCount.get(assignment.facultyId) ?? 0) -
+          this.hours(assignment.timeSlotIds, ctx)
+      )
     );
   }
 

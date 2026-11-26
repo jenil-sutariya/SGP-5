@@ -1,5 +1,10 @@
-import { ConflictSeverity } from '@prisma/client';
+import { teachingDates, occurrenceCancellation, weekMonday } from './occurrence.rules';
+import { venueSatisfies } from '../scheduler/venue.rules';
+import { facultyNameSelect } from './timetable.access';
+import { ConflictSeverity, Prisma } from '@prisma/client';
 import prisma from '../../database/prisma';
+import { NotFoundError } from '../../utils/AppError';
+import { activeBookingWhere, minutes, overlaps } from '../scheduler/scheduler.bookings';
 
 export interface ConflictResult {
   type: string;
@@ -9,203 +14,237 @@ export interface ConflictResult {
 }
 
 export class ConflictService {
+  constructor(private db: Prisma.TransactionClient = prisma) {}
+
   async detect(timetableId: string): Promise<ConflictResult[]> {
-    const entries = await prisma.timetableEntry.findMany({
-      where: { timetableId },
+    const timetable = await this.db.timetable.findUnique({
+      where: { id: timetableId },
+      include: { semester: true },
+    });
+    if (!timetable) throw new NotFoundError('Timetable');
+    const entries = await this.db.timetableEntry.findMany({
+      where: { OR: [{ timetableId }, { timetable: activeBookingWhere(timetable.semester) }] },
       include: {
-        faculty: { include: { user: true } },
+        faculty: { include: { user: { select: facultyNameSelect } } },
         room: true,
         laboratory: true,
         section: true,
         practicalBatch: true,
         day: true,
         timeSlot: true,
-        courseOffering: { include: { subject: true } },
+        courseOffering: { include: { subject: { include: { requirements: true } } } },
+        timetable: { include: { semester: true } },
       },
     });
-
+    const [holidays, leaves] = await Promise.all([
+      this.db.holiday.findMany(),
+      this.db.facultyLeave.findMany({
+        where: {
+          status: 'APPROVED',
+          facultyId: { in: [...new Set(entries.map((e) => e.facultyId))] },
+        },
+      }),
+    ]);
+    const activeDates = new Map(
+      entries.map((entry) => [
+        entry.id,
+        new Set(
+          teachingDates(entry.timetable.semester, entry.day.name).filter(
+            (date) =>
+              !occurrenceCancellation(
+                date,
+                entry.timetable.instituteId,
+                entry.timetable.academicYearId,
+                entry.facultyId,
+                { holidays, leaves }
+              )
+          )
+        ),
+      ])
+    );
     const conflicts: ConflictResult[] = [];
-    const key = (dayId: string, slotId: string, resourceId: string) => `${dayId}|${slotId}|${resourceId}`;
-
-    const facultyMap = new Map<string, typeof entries>();
-    const roomMap = new Map<string, typeof entries>();
-    const labMap = new Map<string, typeof entries>();
-    const sectionMap = new Map<string, typeof entries>();
-
-    for (const e of entries) {
-      const fk = key(e.dayId, e.timeSlotId, e.facultyId);
-      if (!facultyMap.has(fk)) facultyMap.set(fk, []);
-      facultyMap.get(fk)!.push(e);
-
-      if (e.roomId) {
-        const rk = key(e.dayId, e.timeSlotId, e.roomId);
-        if (!roomMap.has(rk)) roomMap.set(rk, []);
-        roomMap.get(rk)!.push(e);
-      }
-      if (e.laboratoryId) {
-        const lk = key(e.dayId, e.timeSlotId, e.laboratoryId);
-        if (!labMap.has(lk)) labMap.set(lk, []);
-        labMap.get(lk)!.push(e);
-      }
-      if (e.sectionId) {
-        const sk = key(e.dayId, e.timeSlotId, e.sectionId);
-        if (!sectionMap.has(sk)) sectionMap.set(sk, []);
-        sectionMap.get(sk)!.push(e);
-      }
-    }
-
-    for (const [, group] of facultyMap) {
-      if (group.length > 1) {
-        conflicts.push({
-          type: 'FACULTY_CLASH',
-          severity: ConflictSeverity.CRITICAL,
-          description: `Faculty ${group[0].faculty.user.firstName} ${group[0].faculty.user.lastName} double-booked on ${group[0].day.name} ${group[0].timeSlot.name}`,
-          entryIds: group.map((g) => g.id),
-        });
-      }
-    }
-
-    for (const [, group] of roomMap) {
-      if (group.length > 1) {
-        conflicts.push({
-          type: 'ROOM_CLASH',
-          severity: ConflictSeverity.CRITICAL,
-          description: `Room ${group[0].room?.code} overlapped on ${group[0].day.name} ${group[0].timeSlot.name}`,
-          entryIds: group.map((g) => g.id),
-        });
-      }
-    }
-
-    // LAB_CLASH: Multiple entries can share a lab simultaneously as long as lab capacity is not exceeded
-    for (const [, group] of labMap) {
-      if (group.length > 1) {
-        const lab = group[0].laboratory;
-        if (lab) {
-          let totalCapacity = 0;
-          for (const e of group) {
-            totalCapacity += e.practicalBatch?.capacity ?? e.section?.capacity ?? e.courseOffering.maxStudents;
-          }
-          if (totalCapacity > lab.capacity) {
-            conflicts.push({
-              type: 'LAB_OVERFLOW_CLASH',
-              severity: ConflictSeverity.CRITICAL,
-              description: `Lab ${lab.code} (capacity ${lab.capacity}) overloaded with combined ${totalCapacity} students on ${group[0].day.name} ${group[0].timeSlot.name}`,
-              entryIds: group.map((g) => g.id),
-            });
-          }
+    const targetIds = new Set(
+      entries.filter((e) => e.timetableId === timetableId).map((e) => e.id)
+    );
+    const add = (type: string, description: string, ids: string[]) => {
+      if (ids.some((id) => targetIds.has(id)))
+        conflicts.push({ type, severity: ConflictSeverity.HIGH, description, entryIds: ids });
+    };
+    for (let i = 0; i < entries.length; i++) {
+      const a = entries[i];
+      for (const b of entries.slice(i + 1)) {
+        if (!targetIds.has(a.id) && !targetIds.has(b.id)) continue;
+        if (a.day.name !== b.day.name || !overlaps(a.timeSlot, b.timeSlot)) continue;
+        if (
+          a.timetable.semester.startDate > b.timetable.semester.endDate ||
+          b.timetable.semester.startDate > a.timetable.semester.endDate
+        )
+          continue;
+        if (![...activeDates.get(a.id)!].some((date) => activeDates.get(b.id)!.has(date))) continue;
+        const when = a.day.name + ' ' + a.timeSlot.startTime + '–' + a.timeSlot.endTime;
+        const ids = [a.id, b.id];
+        if (a.facultyId === b.facultyId)
+          add(
+            'FACULTY_CLASH',
+            'Faculty ' + a.faculty.user.firstName + ' is double-booked on ' + when,
+            ids
+          );
+        if (a.roomId && a.roomId === b.roomId)
+          add('ROOM_CLASH', 'Classroom ' + a.room?.code + ' is double-booked on ' + when, ids);
+        if (a.laboratoryId && a.laboratoryId === b.laboratoryId)
+          add(
+            'LAB_CLASH',
+            'Laboratory ' + a.laboratory?.code + ' is double-booked on ' + when,
+            ids
+          );
+        if (a.practicalBatchId && a.practicalBatchId === b.practicalBatchId)
+          add('BATCH_CLASH', 'Practical batch is double-booked on ' + when, ids);
+        if (
+          a.sectionId &&
+          a.sectionId === b.sectionId &&
+          (!a.practicalBatchId || !b.practicalBatchId)
+        ) {
+          add(
+            'SECTION_CLASH',
+            'Division ' + a.section?.code + ' has overlapping classes on ' + when,
+            ids
+          );
         }
       }
+      const venue = a.room || a.laboratory;
+      if (venue && !venueSatisfies(venue, 0, a.courseOffering.subject.requirements))
+        add(
+          'VENUE_REQUIREMENTS',
+          'Venue does not meet subject equipment, capacity or room-type requirements',
+          [a.id]
+        );
+      const needed =
+        a.practicalBatch?.capacity ?? a.section?.capacity ?? a.courseOffering.maxStudents;
+      if (a.room && a.room.capacity < needed)
+        add('ROOM_CAPACITY', 'Classroom capacity is below ' + needed, [a.id]);
+      if (a.laboratory && a.laboratory.capacity < needed)
+        add('LAB_CAPACITY', 'Laboratory capacity is below ' + needed, [a.id]);
+      if (a.courseOffering.subject.type === 'LAB' && (!a.laboratoryId || a.roomId))
+        add('LAB_REQUIRED', 'Lab teaching requires a laboratory', [a.id]);
+      if (a.courseOffering.subject.type !== 'LAB' && (!a.roomId || a.laboratoryId))
+        add('ROOM_REQUIRED', 'This session requires a classroom', [a.id]);
+      if (a.timeSlot.isLunchBreak || !a.day.isWorking || !a.timeSlot.isActive)
+        add('INVALID_PERIOD', 'Session uses a break or inactive calendar period', [a.id]);
     }
-
-    // SECTION_CLASH & BATCH_CLASH
-    for (const [, group] of sectionMap) {
-      if (group.length > 1) {
-        const hasTheory = group.some((e) => !e.isLab || !e.practicalBatchId);
-        if (hasTheory) {
-          conflicts.push({
-            type: 'SECTION_CLASH',
-            severity: ConflictSeverity.HIGH,
-            description: `Section ${group[0].section?.code} has overlapping theory/practical classes on ${group[0].day.name} ${group[0].timeSlot.name}`,
-            entryIds: group.map((g) => g.id),
-          });
-        } else {
-          // Verify batch-level double booking
-          const batchMap = new Map<string, typeof entries>();
-          for (const e of group) {
-            if (e.practicalBatchId) {
-              if (!batchMap.has(e.practicalBatchId)) batchMap.set(e.practicalBatchId, []);
-              batchMap.get(e.practicalBatchId)!.push(e);
-            }
-          }
-          for (const [batchId, batchGroup] of batchMap) {
-            if (batchGroup.length > 1) {
-              const batchName = batchGroup[0].practicalBatch?.name ?? batchId;
-              conflicts.push({
-                type: 'BATCH_CLASH',
-                severity: ConflictSeverity.HIGH,
-                description: `Batch ${batchName} of Section ${group[0].section?.code} has overlapping practicals on ${group[0].day.name} ${group[0].timeSlot.name}`,
-                entryIds: batchGroup.map((g) => g.id),
-              });
-            }
-          }
+    const targetFaculty = [
+      ...new Set(entries.filter((e) => targetIds.has(e.id)).map((e) => e.facultyId)),
+    ];
+    const [availability, preferences] = await Promise.all([
+      this.db.facultyAvailability.findMany({
+        where: { facultyId: { in: targetFaculty }, isAvailable: false },
+      }),
+      this.db.facultyPreference.findMany({
+        where: { facultyId: { in: targetFaculty }, preferenceType: 'UNAVAILABLE' },
+      }),
+    ]);
+    for (const e of entries.filter((e) => targetIds.has(e.id))) {
+      if (
+        availability.some(
+          (a) => a.facultyId === e.facultyId && a.dayId === e.dayId && a.timeSlotId === e.timeSlotId
+        ) ||
+        preferences.some(
+          (p) =>
+            p.facultyId === e.facultyId &&
+            (!p.dayId || p.dayId === e.dayId) &&
+            (!p.timeSlotId || p.timeSlotId === e.timeSlotId)
+        )
+      ) {
+        add('FACULTY_UNAVAILABLE', 'Faculty is unavailable during this period', [e.id]);
+      }
+    }
+    for (const facultyId of targetFaculty) {
+      const facultyEntries = entries.filter((e) => e.facultyId === facultyId);
+      const hours = (list: typeof entries) =>
+        list.reduce(
+          (sum, e) => sum + (minutes(e.timeSlot.endTime) - minutes(e.timeSlot.startTime)) / 60,
+          0
+        );
+      const daily = new Map<string, typeof entries>();
+      const weekly = new Map<string, typeof entries>();
+      for (const entry of facultyEntries)
+        for (const date of activeDates.get(entry.id)!) {
+          daily.set(date, [...(daily.get(date) || []), entry]);
+          const week = weekMonday(date);
+          weekly.set(week, [...(weekly.get(week) || []), entry]);
         }
-      }
+      if (
+        [...weekly.values()].some((list) => hours(list) > facultyEntries[0].faculty.maxHoursPerWeek)
+      )
+        add(
+          'FACULTY_WEEKLY_OVERLOAD',
+          'Faculty weekly teaching limit exceeded across timetables',
+          facultyEntries.map((e) => e.id)
+        );
+      if (
+        [...daily.values()].some((list) => hours(list) > facultyEntries[0].faculty.maxHoursPerDay)
+      )
+        add(
+          'FACULTY_DAILY_OVERLOAD',
+          'Faculty daily teaching limit exceeded across timetables',
+          facultyEntries.map((e) => e.id)
+        );
     }
 
-    // Capacity checks
+    // Validate whole multi-period sessions, including sessions edited one row at a time.
+    const blocks = new Map<string, typeof entries>();
     for (const e of entries) {
-      const capacityNeeded = e.practicalBatch?.capacity ?? e.section?.capacity ?? e.courseOffering.maxStudents;
-      if (e.roomId && e.room && e.room.capacity < capacityNeeded) {
-        conflicts.push({
-          type: 'ROOM_CAPACITY',
-          severity: ConflictSeverity.MEDIUM,
-          description: `Room ${e.room.code} capacity ${e.room.capacity} < required ${capacityNeeded}`,
-          entryIds: [e.id],
-        });
-      }
-      if (e.laboratoryId && e.laboratory && e.laboratory.capacity < capacityNeeded) {
-        conflicts.push({
-          type: 'LAB_CAPACITY',
-          severity: ConflictSeverity.MEDIUM,
-          description: `Lab ${e.laboratory.code} capacity ${e.laboratory.capacity} < required ${capacityNeeded}`,
-          entryIds: [e.id],
-        });
-      }
-      if (e.isLab && !e.laboratoryId) {
-        conflicts.push({
-          type: 'LAB_REQUIRED',
-          severity: ConflictSeverity.HIGH,
-          description: `Lab session for ${e.courseOffering.subject.code} missing laboratory assignment`,
-          entryIds: [e.id],
-        });
+      if (!['LAB', 'PRACTICAL'].includes(e.courseOffering.subject.type)) continue;
+      const key =
+        e.sessionId ||
+        e.timetableId +
+          '|' +
+          e.courseOfferingId +
+          '|' +
+          (e.practicalBatchId || '') +
+          '|' +
+          e.day.name;
+      const block = blocks.get(key) ?? [];
+      block.push(e);
+      blocks.set(key, block);
+    }
+    for (const block of blocks.values()) {
+      if (!block.some((e) => targetIds.has(e.id))) continue;
+      const subject = block[0].courseOffering.subject;
+      const expected =
+        subject.type === 'LAB'
+          ? Math.max(2, subject.labHours || 2)
+          : subject.weeklyHours === 1
+            ? 1
+            : 2;
+      block.sort((a, b) => minutes(a.timeSlot.startTime) - minutes(b.timeSlot.startTime));
+      if (
+        block.length !== expected ||
+        block.some(
+          (e, i) =>
+            e.facultyId !== block[0].facultyId ||
+            e.roomId !== block[0].roomId ||
+            e.laboratoryId !== block[0].laboratoryId ||
+            (i > 0 && minutes(block[i - 1].timeSlot.endTime) !== minutes(e.timeSlot.startTime))
+        )
+      ) {
+        add(
+          'INCOMPLETE_SESSION',
+          'Multi-period session must have consecutive periods with the same faculty and venue',
+          block.map((e) => e.id)
+        );
       }
     }
-
-    // Max lectures per faculty per day
-    const facultyDayCount = new Map<string, { count: number; max: number; entries: string[]; name: string; day: string }>();
-    for (const e of entries) {
-      const k = `${e.facultyId}|${e.dayId}`;
-      const cur = facultyDayCount.get(k) ?? {
-        count: 0,
-        max: e.faculty.maxHoursPerDay,
-        entries: [],
-        name: `${e.faculty.user.firstName} ${e.faculty.user.lastName}`,
-        day: e.day.name,
-      };
-      cur.count += 1;
-      cur.entries.push(e.id);
-      facultyDayCount.set(k, cur);
-    }
-    for (const [, v] of facultyDayCount) {
-      if (v.count > v.max) {
-        conflicts.push({
-          type: 'FACULTY_DAILY_OVERLOAD',
-          severity: ConflictSeverity.MEDIUM,
-          description: `${v.name} has ${v.count} lectures on ${v.day} (max ${v.max})`,
-          entryIds: v.entries,
-        });
-      }
-    }
-
     return conflicts;
   }
 
   async detectAndPersist(timetableId: string) {
     const conflicts = await this.detect(timetableId);
-    await prisma.timetableConflict.deleteMany({ where: { timetableId, resolved: false } });
-    if (conflicts.length) {
-      await prisma.timetableConflict.createMany({
-        data: conflicts.map((c) => ({
-          timetableId,
-          type: c.type,
-          severity: c.severity,
-          description: c.description,
-          entryIds: c.entryIds,
-        })),
+    await this.db.timetableConflict.deleteMany({ where: { timetableId, resolved: false } });
+    if (conflicts.length)
+      await this.db.timetableConflict.createMany({
+        data: conflicts.map((c) => ({ timetableId, ...c })),
       });
-    }
     return conflicts;
   }
 }
-
 export const conflictService = new ConflictService();

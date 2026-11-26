@@ -8,7 +8,7 @@ export class SubjectService {
     const { page, limit, skip, sortBy, sortOrder, search } = getPagination(query);
     const where = {
       ...(query.departmentId ? { departmentId: query.departmentId } : {}),
-      ...(query.instituteId  ? { department: { instituteId: query.instituteId } } : {}),
+      ...(query.instituteId ? { department: { instituteId: query.instituteId } } : {}),
       ...buildSearchFilter(search, ['name', 'code']),
     };
     const [data, total] = await Promise.all([
@@ -21,7 +21,22 @@ export class SubjectService {
       }),
       prisma.subject.count({ where }),
     ]);
-    return { data, total, page, limit };
+    return {
+      data: data.map((subject) => {
+        const requirement = subject.requirements.find(
+          (r) => r.requirement === 'Venue requirements'
+        );
+        return {
+          ...subject,
+          requiredEquipment: requirement?.equipment,
+          requiredRoomTypeId: requirement?.roomTypeId,
+          minRoomCapacity: requirement?.minCapacity,
+        };
+      }),
+      total,
+      page,
+      limit,
+    };
   }
 
   async getById(id: string) {
@@ -34,6 +49,9 @@ export class SubjectService {
   }
 
   async create(data: {
+    requiredEquipment?: string | null;
+    requiredRoomTypeId?: string | null;
+    minRoomCapacity?: number | null;
     code: string;
     name: string;
     description?: string;
@@ -48,12 +66,57 @@ export class SubjectService {
     if (await prisma.subject.findUnique({ where: { code: data.code } })) {
       throw new ConflictError('Subject code already exists');
     }
-    return prisma.subject.create({ data, include: { department: true } });
+    const { requiredEquipment, requiredRoomTypeId, minRoomCapacity, ...fields } = data;
+    return prisma.subject.create({
+      data: {
+        ...fields,
+        ...(requiredEquipment || requiredRoomTypeId || minRoomCapacity
+          ? {
+              requirements: {
+                create: {
+                  requirement: 'Venue requirements',
+                  equipment: requiredEquipment,
+                  roomTypeId: requiredRoomTypeId,
+                  minCapacity: minRoomCapacity,
+                },
+              },
+            }
+          : {}),
+      },
+      include: { department: true },
+    });
   }
 
   async update(id: string, data: Record<string, unknown>) {
     await this.getById(id);
-    return prisma.subject.update({ where: { id }, data, include: { department: true } });
+    const { requiredEquipment, requiredRoomTypeId, minRoomCapacity, ...fields } = data;
+    const changing = ['requiredEquipment', 'requiredRoomTypeId', 'minRoomCapacity'].some(
+      (key) => key in data
+    );
+    return prisma.subject.update({
+      where: { id },
+      data: {
+        ...fields,
+        ...(changing
+          ? {
+              requirements: {
+                deleteMany: { requirement: 'Venue requirements' },
+                ...(requiredEquipment || requiredRoomTypeId || minRoomCapacity
+                  ? {
+                      create: {
+                        requirement: 'Venue requirements',
+                        equipment: requiredEquipment as string | null,
+                        roomTypeId: requiredRoomTypeId as string | null,
+                        minCapacity: minRoomCapacity as number | null,
+                      },
+                    }
+                  : {}),
+              },
+            }
+          : {}),
+      },
+      include: { department: true },
+    });
   }
 
   async remove(id: string) {

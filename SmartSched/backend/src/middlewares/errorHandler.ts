@@ -11,6 +11,18 @@ export function errorHandler(
   res: Response,
   _next: NextFunction
 ): Response {
+  // PostgreSQL deferred scheduling checks also protect ordinary academic CRUD transactions.
+  const databaseMessage = String((err as Error).message || '');
+  const scheduleMessage = /SCHEDULE_CONFLICT: ([^\n]+)/.exec(databaseMessage)?.[1];
+  if (scheduleMessage || databaseMessage.includes('no_resource_overlap')) {
+    return ApiResponse.error(
+      res,
+      scheduleMessage ||
+        'This change would double-book a classroom, lab, faculty member or student group. No changes were saved.',
+      409,
+      'SCHEDULE_CONFLICT'
+    );
+  }
   if (err instanceof ZodError) {
     return ApiResponse.error(
       res,

@@ -15,4 +15,5 @@ frontend/dist/
 backend/dist/
 backend/logs/
 postgres_data/
+.backups/
 .turbo/

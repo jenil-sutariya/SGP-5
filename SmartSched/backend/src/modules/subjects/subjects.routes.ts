@@ -7,12 +7,28 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { authenticate, authorize, AuthRequest } from '../../middlewares/auth';
 import { validate } from '../../middlewares/errorHandler';
 import { subjectSchema, paginationSchema } from '../../validators/common';
+import prisma from '../../database/prisma';
+import { TimetableAccess } from '../timetable/timetable.access';
 import { resolveInstituteScope } from '../../utils/instituteScope';
 
 const managers = [RoleName.ADMIN, RoleName.INSTITUTE_ADMIN, RoleName.DEPARTMENT_HEAD] as const;
 
 export const subjectRouter = Router();
 subjectRouter.use(authenticate);
+subjectRouter.use(
+  asyncHandler(async (req: AuthRequest, _res, next) => {
+    if (req.method !== 'GET') {
+      const access = await TimetableAccess.forUser(req.user);
+      const id = req.path.split('/')[1];
+      if (id) {
+        const subject = await subjectService.getById(id);
+        await access.assertResource('department', subject.departmentId);
+      }
+      if (req.body?.departmentId) await access.assertResource('department', req.body.departmentId);
+    }
+    next();
+  })
+);
 
 subjectRouter.get(
   '/',
@@ -45,7 +61,11 @@ subjectRouter.patch(
   authorize(...managers),
   validate(subjectSchema.partial()),
   asyncHandler(async (req, res: Response) =>
-    ApiResponse.success(res, await subjectService.update(String(req.params.id), req.body), 'Updated')
+    ApiResponse.success(
+      res,
+      await subjectService.update(String(req.params.id), req.body),
+      'Updated'
+    )
   )
 );
 

@@ -10,7 +10,7 @@ export const authApi = {
 };
 
 export const analyticsApi = {
-  dashboard: () => api.get('/analytics/dashboard'),
+  dashboard: (params?: { instituteId?: string }) => api.get('/analytics/dashboard', { params }),
   roomUtilization: () => api.get('/analytics/room-utilization'),
   facultyWorkload: () => api.get('/analytics/faculty-workload'),
 };
@@ -102,6 +102,9 @@ export const sectionsApi = {
 };
 
 export const academicApi = {
+  holidays: (params?: Record<string, unknown>) => api.get('/meta/holidays', { params }),
+  createHoliday: (data: unknown) => api.post('/meta/holidays', data),
+  deleteHoliday: (id: string) => api.delete('/meta/holidays/'+id),
   years: (params?: Record<string, unknown>) => api.get('/academic-years', { params }),
   semesters: (params?: Record<string, unknown>) => api.get('/semesters', { params }),
   days: (params?: Record<string, unknown>) => api.get('/meta/days', { params }),
@@ -110,11 +113,19 @@ export const academicApi = {
 };
 
 export const timetableApi = {
+  occurrences: (id: string, week?: string) => api.get('/timetables/'+id+'/occurrences', { params: { week } }),
+  createSession: (id: string, data: unknown) => api.post('/timetables/'+id+'/sessions', data),
+  updateSession: (id: string, sessionId: string, data: unknown) => api.patch('/timetables/'+id+'/sessions/'+sessionId, data),
+  deleteSession: (id: string, sessionId: string) => api.delete('/timetables/'+id+'/sessions/'+sessionId),
+  viewResource: (kind: 'room' | 'lab', id: string, semesterId?: string, week?: string) =>
+    api.get(`/timetables/views/resource/${kind}/${encodeURIComponent(id)}`, { params: { semesterId, week } }),
+  remove: (id: string) => api.delete(`/timetables/${id}`),
   list: (params?: Record<string, unknown>) => api.get('/timetables', { params }),
   get: (id: string) => api.get(`/timetables/${id}`),
   entries: (id: string) => api.get(`/timetables/${id}/entries`),
   updateEntry: (entryId: string, data: unknown) => api.patch(`/timetables/entries/${entryId}`, data),
   conflicts: (id: string) => api.get(`/timetables/${id}/conflicts`),
+  unpublish: (id: string) => api.post(`/timetables/${id}/unpublish`),
   publish: (id: string) => api.post(`/timetables/${id}/publish`),
   exportExcel: (id: string) => api.get(`/timetables/${id}/export/excel`, { responseType: 'blob' }),
   exportPdf: (id: string) => api.get(`/timetables/${id}/export/pdf`, { responseType: 'blob' }),

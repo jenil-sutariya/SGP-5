@@ -35,20 +35,25 @@ export function resolveInstituteScope(
   if (isSuperAdmin(user.role)) {
     return queryInstituteId || undefined;
   }
-  return user.instituteId || queryInstituteId || undefined;
+  if (!user.instituteId) throw new ForbiddenError('Your account has no institute assigned');
+  if (queryInstituteId && queryInstituteId !== user.instituteId) {
+    throw new ForbiddenError('You can only access your institute');
+  }
+  return user.instituteId;
 }
 
 /**
  * Asserts that the authenticated user has access to manage/view a resource
  * belonging to resourceInstituteId.
  */
-export function assertInstituteAccess(user: AuthRequest['user'], resourceInstituteId?: string | null) {
+export function assertInstituteAccess(
+  user: AuthRequest['user'],
+  resourceInstituteId?: string | null
+) {
   if (!user) throw new ForbiddenError();
   if (isSuperAdmin(user.role)) return; // Super admin has global access
 
-  if (user.instituteId) {
-    if (!resourceInstituteId || resourceInstituteId !== user.instituteId) {
-      throw new ForbiddenError('You can only manage data for your institute');
-    }
+  if (!user.instituteId || !resourceInstituteId || resourceInstituteId !== user.instituteId) {
+    throw new ForbiddenError('You can only manage data for your institute');
   }
 }
