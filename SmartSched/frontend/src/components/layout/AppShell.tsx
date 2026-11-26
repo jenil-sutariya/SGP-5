@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuthStore, useThemeStore, RoleName } from '@/store/authStore';
-import { useFeatureFlagsStore, FeatureKey } from '@/store/featureFlagsStore';
+import { useFeatureFlagsStore, useFeatureFlagsQuery, FeatureKey } from '@/store/featureFlagsStore';
 import { Button } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import { ROLE_LABELS, UNIVERSITY } from '@/constants/university';
@@ -166,7 +166,8 @@ const SECTION_ORDER: NavSection[] = ['workspace', 'scheduling', 'academics', 'fa
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuthStore();
   const { theme } = useThemeStore();
-  const { flags, fetchFlags } = useFeatureFlagsStore();
+  const { flags } = useFeatureFlagsStore();
+  useFeatureFlagsQuery(!!user);
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(false);
@@ -174,10 +175,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
   const role = user?.role?.name;
-
-  useEffect(() => {
-    fetchFlags();
-  }, [fetchFlags]);
 
   useEffect(() => {
     const root = document.documentElement;

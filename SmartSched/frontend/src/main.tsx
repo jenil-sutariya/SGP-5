@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import AppRouter from '@/routes/AppRouter';
 import { GenerationWindow } from '@/components/common/GenerationWindow';
+import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import '@/styles/globals.css';
 
 const queryClient = new QueryClient({
@@ -18,12 +19,14 @@ useAuthStore.subscribe((state, previous) => { if (state.user?.id !== previous.us
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AppRouter />
-        <GenerationWindow />
-        <Toaster richColors position="top-right" />
-      </BrowserRouter>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <AppRouter />
+          <GenerationWindow />
+          <Toaster richColors position="top-right" />
+        </BrowserRouter>
+      </QueryClientProvider>
+    </ErrorBoundary>
   </StrictMode>
 );

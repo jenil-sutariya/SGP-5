@@ -1,12 +1,26 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { CalendarDays, Mail, ShieldCheck, Building2, Settings } from 'lucide-react';
+import { authApi } from '@/api';
 import { Card, Button, Badge } from '@/components/ui';
-import { useAuthStore } from '@/store/authStore';
+import { useAuthStore, type AuthUser } from '@/store/authStore';
 import { ROLE_LABELS } from '@/constants/university';
 import { InstituteBadge } from '@/components/common/InstituteBadge';
 
 export default function ProfilePage() {
-  const user = useAuthStore((s) => s.user);
+  const storeUser = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
+  const { data: user = storeUser } = useQuery({
+    queryKey: ['auth-me', storeUser?.id],
+    enabled: !!storeUser?.id,
+    initialData: storeUser ?? undefined,
+    queryFn: async () => (await authApi.me()).data.data as AuthUser,
+  });
+
+  useEffect(() => {
+    if (user && user.id === storeUser?.id) setUser(user);
+  }, [user, storeUser?.id, setUser]);
   const initials = `${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase() || 'U';
   const roleLabel = user?.role?.name ? ROLE_LABELS[user.role.name] ?? user.role.name : 'User';
 

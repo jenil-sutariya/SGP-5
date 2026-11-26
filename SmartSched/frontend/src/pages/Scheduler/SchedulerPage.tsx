@@ -186,6 +186,21 @@ export default function SchedulerPage() {
     },
   });
 
+  const checkConflicts = useMutation({
+    mutationFn: (timetableId: string) => schedulerApi.resolveConflicts(timetableId),
+    onSuccess: (res, timetableId) => {
+      toast.info(res.data.data.remaining.length + ' conflicts found. No sessions were deleted.');
+      qc.invalidateQueries({ queryKey: ['conflicts', timetableId] });
+      qc.invalidateQueries({ queryKey: ['scheduler-status', timetableId] });
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        (error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+          'Could not check conflicts'
+      );
+    },
+  });
+
   const isScheduling = generate.isPending || scheduleRemaining.isPending;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -445,7 +460,7 @@ export default function SchedulerPage() {
                 during their booked periods.
               </p>
 
-              {(status.metadata?.unassigned?.length ?? 0) > 0 && (
+              {Array.isArray(status.metadata?.unassigned) && status.metadata.unassigned.length > 0 && (
                 <div className="rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50/80 dark:bg-amber-950/40 p-3.5 text-xs text-amber-950 dark:text-amber-200">
                   <strong className="flex items-center gap-1.5 font-bold mb-1.5">
                     <AlertTriangle size={14} aria-hidden="true" />
@@ -480,21 +495,11 @@ export default function SchedulerPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={async () => {
-                    try {
-                      const res = await schedulerApi.resolveConflicts(resultId);
-                      toast.info(
-                        res.data.data.remaining.length +
-                          ' conflicts found. No sessions were deleted.'
-                      );
-                      qc.invalidateQueries({ queryKey: ['conflicts', resultId] });
-                      qc.invalidateQueries({ queryKey: ['scheduler-status', resultId] });
-                    } catch (error: any) {
-                      toast.error(error?.response?.data?.message ?? 'Could not check conflicts');
-                    }
-                  }}
+                  disabled={checkConflicts.isPending}
+                  onClick={() => checkConflicts.mutate(resultId)}
                 >
-                  <ShieldCheck size={14} aria-hidden="true" /> Check conflicts
+                  <ShieldCheck size={14} aria-hidden="true" />{' '}
+                  {checkConflicts.isPending ? 'Checking…' : 'Check conflicts'}
                 </Button>
                 <Button asChild size="sm">
                   <Link to="/timetable">
@@ -504,7 +509,12 @@ export default function SchedulerPage() {
               </div>
 
               <div className="max-h-60 space-y-2 overflow-y-auto pt-2">
-                {(conflicts ?? status.conflicts ?? []).map(
+                {(Array.isArray(conflicts)
+                  ? conflicts
+                  : Array.isArray(status.conflicts)
+                    ? status.conflicts
+                    : []
+                ).map(
                   (c: { id: string; type: string; severity: string; description: string }) => (
                     <div
                       key={c.id}

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -53,21 +54,27 @@ export default function LoginPage() {
     register,
     handleSubmit,
     setValue,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm<Form>({ resolver: zodResolver(schema) });
 
-  const onSubmit = async (values: Form) => {
-    try {
-      const { data } = await authApi.login(values.email, values.password);
+  const loginMutation = useMutation({
+    mutationFn: (values: Form) => authApi.login(values.email, values.password),
+    onSuccess: ({ data }) => {
       setAuth(data.data.user, data.data.accessToken, data.data.refreshToken);
       toast.success(`Welcome to ${UNIVERSITY.productName}`);
       navigate('/dashboard');
-    } catch (e: unknown) {
+    },
+    onError: (e: unknown) => {
       const msg =
         (e as { response?: { data?: { message?: string } } })?.response?.data?.message ??
         'Login failed';
       toast.error(msg);
-    }
+    },
+  });
+  const isSubmitting = loginMutation.isPending;
+
+  const onSubmit = (values: Form) => {
+    loginMutation.mutate(values);
   };
 
   const handleQuickLogin = (email: string) => {

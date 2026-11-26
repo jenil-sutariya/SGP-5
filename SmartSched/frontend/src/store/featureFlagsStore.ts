@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/axios';
 
 export type FeatureKey =
@@ -149,147 +151,120 @@ export const DEFAULT_FEATURE_FLAGS: Record<FeatureKey, boolean> = {
   notifications: true,
 };
 
+export type FeaturePreset = 'all' | 'none' | 'scheduling_only' | 'core_demo';
+
 interface FeatureFlagsState {
   flags: Record<FeatureKey, boolean>;
-  isLoading: boolean;
   isInitialized: boolean;
   lastUpdated: string | null;
-  
-  // Actions
-  fetchFlags: () => Promise<void>;
-  toggleFeature: (key: FeatureKey) => Promise<void>;
-  setFeatureState: (key: FeatureKey, enabled: boolean) => Promise<void>;
-  applyPreset: (preset: 'all' | 'none' | 'scheduling_only' | 'core_demo') => Promise<void>;
+  setFlags: (flags: Record<FeatureKey, boolean>, lastUpdated?: string) => void;
+  markInitialized: () => void;
   isFeatureEnabled: (key: FeatureKey) => boolean;
+}
+
+export function getPresetFlags(preset: FeaturePreset): Record<FeatureKey, boolean> {
+  switch (preset) {
+    case 'none':
+      return Object.keys(DEFAULT_FEATURE_FLAGS).reduce((acc, k) => {
+        acc[k as FeatureKey] = false;
+        return acc;
+      }, {} as Record<FeatureKey, boolean>);
+    case 'scheduling_only':
+      return {
+        institutes: false,
+        departments: true,
+        batches: false,
+        sections: true,
+        faculty: true,
+        students: false,
+        courses: false,
+        subjects: true,
+        rooms: true,
+        labs: true,
+        timetable: true,
+        scheduler: true,
+        notifications: true,
+      };
+    case 'core_demo':
+    case 'all':
+    default:
+      return { ...DEFAULT_FEATURE_FLAGS };
+  }
 }
 
 export const useFeatureFlagsStore = create<FeatureFlagsState>()(
   persist(
     (set, get) => ({
       flags: DEFAULT_FEATURE_FLAGS,
-      isLoading: false,
       isInitialized: false,
       lastUpdated: null,
-
-      fetchFlags: async () => {
-        set({ isLoading: true });
-        try {
-          const res = await api.get('/settings');
-          const settingsList: Array<{ key: string; value: any }> = res.data?.data || res.data || [];
-          const flagsSetting = settingsList.find((s) => s.key === 'feature_flags');
-
-          if (flagsSetting && flagsSetting.value && typeof flagsSetting.value === 'object') {
-            set({
-              flags: { ...DEFAULT_FEATURE_FLAGS, ...flagsSetting.value },
-              isInitialized: true,
-              lastUpdated: new Date().toISOString(),
-            });
-          } else {
-            set({ flags: DEFAULT_FEATURE_FLAGS, isInitialized: true });
-          }
-        } catch {
-          // Fallback to local persisted/default flags if offline
-          set({ isInitialized: true });
-        } finally {
-          set({ isLoading: false });
-        }
-      },
-
-      toggleFeature: async (key: FeatureKey) => {
-        const currentFlags = get().flags;
-        const newValue = !currentFlags[key];
-        await get().setFeatureState(key, newValue);
-      },
-
-      setFeatureState: async (key: FeatureKey, enabled: boolean) => {
-        const currentFlags = get().flags;
-        const updatedFlags = { ...currentFlags, [key]: enabled };
-        
-        // Optimistic UI update
-        set({ flags: updatedFlags, lastUpdated: new Date().toISOString() });
-
-        try {
-          await api.put('/settings/feature_flags', {
-            value: updatedFlags,
-            category: 'system',
-            label: 'Master Admin Feature Flags',
-          });
-        } catch (err) {
-          console.error('Failed to sync feature flags to server', err);
-        }
-      },
-
-      applyPreset: async (preset) => {
-        let newFlags: Record<FeatureKey, boolean>;
-
-        switch (preset) {
-          case 'all':
-            newFlags = { ...DEFAULT_FEATURE_FLAGS };
-            break;
-          case 'none':
-            newFlags = Object.keys(DEFAULT_FEATURE_FLAGS).reduce((acc, k) => {
-              acc[k as FeatureKey] = false;
-              return acc;
-            }, {} as Record<FeatureKey, boolean>);
-            break;
-          case 'scheduling_only':
-            newFlags = {
-              institutes: false,
-              departments: true,
-              batches: false,
-              sections: true,
-              faculty: true,
-              students: false,
-              courses: false,
-              subjects: true,
-              rooms: true,
-              labs: true,
-              timetable: true,
-              scheduler: true,
-              notifications: true,
-            };
-            break;
-          case 'core_demo':
-            newFlags = {
-              institutes: true,
-              departments: true,
-              batches: true,
-              sections: true,
-              faculty: true,
-              students: true,
-              courses: true,
-              subjects: true,
-              rooms: true,
-              labs: true,
-              timetable: true,
-              scheduler: true,
-              notifications: true,
-            };
-            break;
-          default:
-            newFlags = { ...DEFAULT_FEATURE_FLAGS };
-        }
-
-        set({ flags: newFlags, lastUpdated: new Date().toISOString() });
-
-        try {
-          await api.put('/settings/feature_flags', {
-            value: newFlags,
-            category: 'system',
-            label: 'Master Admin Feature Flags',
-          });
-        } catch (err) {
-          console.error('Failed to sync preset feature flags to server', err);
-        }
-      },
-
-      isFeatureEnabled: (key: FeatureKey) => {
-        const state = get();
-        return state.flags[key] ?? true;
-      },
+      setFlags: (flags, lastUpdated = new Date().toISOString()) =>
+        set({ flags, isInitialized: true, lastUpdated }),
+      markInitialized: () => set({ isInitialized: true }),
+      isFeatureEnabled: (key: FeatureKey) => get().flags[key] ?? true,
     }),
     {
       name: 'smart-sched-feature-flags',
     }
   )
 );
+
+export function useFeatureFlagsQuery(enabled = true) {
+  const setFlags = useFeatureFlagsStore((s) => s.setFlags);
+  const markInitialized = useFeatureFlagsStore((s) => s.markInitialized);
+
+  const query = useQuery({
+    queryKey: ['feature-flags'],
+    enabled,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const res = await api.get('/settings');
+      const settingsList: Array<{ key: string; value: unknown }> = res.data?.data || res.data || [];
+      const flagsSetting = settingsList.find((s) => s.key === 'feature_flags');
+      if (flagsSetting?.value && typeof flagsSetting.value === 'object') {
+        return {
+          ...DEFAULT_FEATURE_FLAGS,
+          ...(flagsSetting.value as Partial<Record<FeatureKey, boolean>>),
+        };
+      }
+      return { ...DEFAULT_FEATURE_FLAGS };
+    },
+  });
+
+  useEffect(() => {
+    if (query.data) {
+      setFlags(query.data);
+    } else if (query.isError) {
+      markInitialized();
+    }
+  }, [query.data, query.isError, setFlags, markInitialized]);
+
+  return query;
+}
+
+export function useSaveFeatureFlagsMutation() {
+  const qc = useQueryClient();
+  const setFlags = useFeatureFlagsStore((s) => s.setFlags);
+
+  return useMutation({
+    mutationFn: async (updatedFlags: Record<FeatureKey, boolean>) => {
+      await api.put('/settings/feature_flags', {
+        value: updatedFlags,
+        category: 'system',
+        label: 'Master Admin Feature Flags',
+      });
+      return updatedFlags;
+    },
+    onMutate: (updatedFlags) => {
+      const previous = useFeatureFlagsStore.getState().flags;
+      setFlags(updatedFlags);
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) setFlags(context.previous);
+    },
+    onSuccess: (updatedFlags) => {
+      qc.setQueryData(['feature-flags'], updatedFlags);
+    },
+  });
+}

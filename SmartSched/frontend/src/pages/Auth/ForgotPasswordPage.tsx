@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { ArrowLeft, CalendarDays, Mail } from 'lucide-react';
+import { authApi } from '@/api';
 import { Button, Input, Label } from '@/components/ui';
 import { CharusatAnimatedBackground } from '@/components/common/CharusatAnimatedBackground';
 import { ThemeSwitcher } from '@/components/common/ThemeSwitcher';
@@ -9,7 +11,6 @@ import { useThemeStore } from '@/store/authStore';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
-  const [loading, setLoading] = useState(false);
   const theme = useThemeStore((s) => s.theme);
 
   useEffect(() => {
@@ -18,22 +19,24 @@ export default function ForgotPasswordPage() {
     root.classList.toggle('dark', theme === 'dark' || (theme === 'system' && prefersDark));
   }, [theme]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email) return;
-    setLoading(true);
-    try {
-      const { authApi } = await import('@/api');
-      const res = await authApi.forgotPassword(email);
+  const forgotMutation = useMutation({
+    mutationFn: (targetEmail: string) => authApi.forgotPassword(targetEmail),
+    onSuccess: (res) => {
       toast.success(res.data.data.message ?? 'Reset link sent!');
       if (res.data.data.resetToken) {
         toast.message(`Dev token: ${res.data.data.resetToken}`);
       }
-    } catch {
+    },
+    onError: () => {
       toast.error('Failed to send reset link. Check the email address.');
-    } finally {
-      setLoading(false);
-    }
+    },
+  });
+  const loading = forgotMutation.isPending;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) return;
+    forgotMutation.mutate(email);
   };
 
   return (

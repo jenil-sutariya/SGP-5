@@ -1,4 +1,5 @@
-import React, { useEffect } from 'react';
+import React from 'react';
+import { toast } from 'sonner';
 import {
   Sliders,
   CheckCircle2,
@@ -21,7 +22,15 @@ import {
   Play,
   RotateCcw,
 } from 'lucide-react';
-import { useFeatureFlagsStore, FEATURE_DEFINITIONS, FeatureKey } from '@/store/featureFlagsStore';
+import {
+  useFeatureFlagsStore,
+  useFeatureFlagsQuery,
+  useSaveFeatureFlagsMutation,
+  getPresetFlags,
+  FEATURE_DEFINITIONS,
+  FeatureKey,
+  FeaturePreset,
+} from '@/store/featureFlagsStore';
 import { Button } from '@/components/ui';
 import { cn } from '@/utils/cn';
 
@@ -50,12 +59,19 @@ const categoryLabels: Record<string, { label: string; badge: string }> = {
 };
 
 export default function MasterAdminPage() {
-  const { flags, toggleFeature, applyPreset, fetchFlags, isLoading, lastUpdated } =
-    useFeatureFlagsStore();
+  const { flags, lastUpdated } = useFeatureFlagsStore();
+  const { isFetching, refetch } = useFeatureFlagsQuery();
+  const saveFlags = useSaveFeatureFlagsMutation();
+  const isLoading = isFetching || saveFlags.isPending;
 
-  useEffect(() => {
-    fetchFlags();
-  }, [fetchFlags]);
+  const updateFlags = (nextFlags: Record<FeatureKey, boolean>) => {
+    saveFlags.mutate(nextFlags, {
+      onError: () => toast.error('Failed to sync feature flags to server'),
+    });
+  };
+  const toggleFeature = (key: FeatureKey) =>
+    updateFlags({ ...flags, [key]: !(flags[key] ?? true) });
+  const applyPreset = (preset: FeaturePreset) => updateFlags(getPresetFlags(preset));
 
   const totalFeatures = FEATURE_DEFINITIONS.length;
   const activeCount = FEATURE_DEFINITIONS.filter((f) => flags[f.key]).length;
@@ -123,7 +139,7 @@ export default function MasterAdminPage() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => fetchFlags()}
+            onClick={() => refetch()}
             disabled={isLoading}
             className="text-xs text-muted hover:text-foreground gap-1.5"
           >

@@ -1,5 +1,6 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, CheckCheck, CheckCircle2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { notificationsApi } from '@/api';
 import { Button, Card, Skeleton } from '@/components/ui';
 import { formatDate } from '@/utils/cn';
@@ -9,6 +10,15 @@ export function NotificationsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['notifications'],
     queryFn: async () => (await notificationsApi.list({ limit: 50 })).data.data,
+  });
+
+  const markAllMutation = useMutation({
+    mutationFn: () => notificationsApi.markAll(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['notifications'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: () => toast.error('Unable to mark notifications as read'),
   });
 
   return (
@@ -30,13 +40,11 @@ export function NotificationsPage() {
         <Button
           variant="outline"
           size="sm"
-          onClick={async () => {
-            await notificationsApi.markAll();
-            qc.invalidateQueries({ queryKey: ['notifications'] });
-            qc.invalidateQueries({ queryKey: ['dashboard'] });
-          }}
+          disabled={markAllMutation.isPending}
+          onClick={() => markAllMutation.mutate()}
         >
-          <CheckCheck size={15} aria-hidden="true" /> Mark all read
+          <CheckCheck size={15} aria-hidden="true" />{' '}
+          {markAllMutation.isPending ? 'Marking…' : 'Mark all read'}
         </Button>
       </section>
 
